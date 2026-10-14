@@ -6,3 +6,7 @@ venv/
 .env
 *.key
 *.pem
+
+# страховка от артефактов credential-хелпера git: он умеет создавать файл с «сплющенным» путём
+Usersxslai*
+*gh_cred*
