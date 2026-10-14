@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docs-in-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: generated site must match the markdown sources
+        run: python build.py --check
+      - name: every post must carry the disclaimer
+        run: |
+          python - <<'PY'
+          import glob, sys
+          missing = [p for p in glob.glob("posts/*.md")
+                     if "Не инвестиционная рекомендация." not in open(p, encoding="utf-8").read()]
+          if missing:
+              sys.exit("нет строки про инвест-рекомендацию: " + ", ".join(missing))
+          print(f"проверено постов: {len(glob.glob('posts/*.md'))}")
+          PY
