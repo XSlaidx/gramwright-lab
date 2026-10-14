@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import re
 import sys
@@ -49,6 +50,8 @@ article code{background:var(--code);padding:2px 5px;border-radius:4px;font-size:
 article pre{background:var(--code);padding:14px;border-radius:8px;overflow:auto}
 article pre code{background:none;padding:0}
 .tags{color:var(--muted);font-size:13px;margin-top:10px}
+.verdict{color:var(--muted);font-size:15px;font-weight:400}
+.intro{color:var(--muted);margin-bottom:26px}
 .meta{color:var(--muted);font-size:13px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 footer.site{border-top:1px solid var(--line);margin-top:44px;padding-top:18px;color:var(--muted);font-size:13px}
 """
@@ -182,6 +185,7 @@ def page(title: str, body: str, *, description: str = SITE_DESC, path: str = "")
 {body}
 <footer class="site">
   Код стенда и аудитора: <a href="https://github.com/XSlaidx/truth-engine">XSlaidx/truth-engine</a>
+  &middot; <a href="{path}graveyard.html">кладбище правил</a>
   &middot; обсуждение: <a href="{TELEGRAM}">@gramwright_lab</a>
 </footer>
 </body>
@@ -238,9 +242,35 @@ def render_feed(posts: list[Post]) -> str:
 """
 
 
+def load_graveyard() -> list[dict]:
+    """Каждое убитое правило — запись в JSON, а не абзац в посте: так её видно в истории коммитов."""
+    path = os.path.join(ROOT, "graveyard.json")
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh).get("entries", [])
+
+
+def render_graveyard(entries: list[dict]) -> str:
+    rows = []
+    for entry in entries:
+        rows.append(f"""<article>
+  <h2>{html.escape(entry['rule'])} <span class="verdict">— {html.escape(entry['verdict'])}</span></h2>
+  <p><strong>Проверено:</strong> {html.escape(entry['tested'])}</p>
+  <p><strong>Чем убито:</strong> {html.escape(entry['cause'])}</p>
+  <p><strong>Цифры:</strong> {html.escape(entry['evidence'])}</p>
+  <p class="tags">{html.escape(entry.get('status', ''))}</p>
+</article>""")
+    intro = ("Записи не удаляются и не редактируются: любая правка видна в истории коммитов. "
+             "Отрицательный результат — тоже результат, и здесь он хранится вместе с причиной смерти.")
+    body = f"<h1>Кладбище правил</h1>\n<p class=\"intro\">{intro}</p>\n" + ("\n".join(rows) or "<p>Пока пусто.</p>")
+    return page("Кладбище правил — " + SITE_TITLE, body)
+
+
 def build() -> dict[str, str]:
     posts = load_posts()
     files = {"index.html": render_index(posts), "style.css": STYLE, "feed.xml": render_feed(posts),
+             "graveyard.html": render_graveyard(load_graveyard()),
              ".nojekyll": ""}
     for post in posts:
         files[f"posts/{post.slug}.html"] = render_post(post)

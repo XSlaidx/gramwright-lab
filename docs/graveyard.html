@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кладбище правил — Gramwright Lab</title>
+<meta name="description" content="Журнал проверки торговых гипотез: что проверяли, что вышло по факту, сколько съели издержки. Числа берутся из журнала стенда. Не инвестиционная рекомендация.">
+<meta property="og:title" content="Кладбище правил — Gramwright Lab">
+<meta property="og:description" content="Журнал проверки торговых гипотез: что проверяли, что вышло по факту, сколько съели издержки. Числа берутся из журнала стенда. Не инвестиционная рекомендация.">
+<meta property="og:type" content="article">
+<link rel="alternate" type="application/rss+xml" href="https://XSlaidx.github.io/gramwright-lab/feed.xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <h1><a href="index.html">Gramwright Lab</a></h1>
+  <p>Журнал проверки торговых гипотез: что проверяли, что вышло по факту, сколько съели издержки. Числа берутся из журнала стенда. Не инвестиционная рекомендация.</p>
+</header>
+<h1>Кладбище правил</h1>
+<p class="intro">Записи не удаляются и не редактируются: любая правка видна в истории коммитов. Отрицательный результат — тоже результат, и здесь он хранится вместе с причиной смерти.</p>
+<article>
+  <h2>R1 — пересечение EMA 9/21 <span class="verdict">— отклонено</span></h2>
+  <p><strong>Проверено:</strong> 2026-10-14, 999 часовых баров, BTCUSDT и ETHUSDT</p>
+  <p><strong>Чем убито:</strong> нет перевеса после издержек: 0,14% на круг (0,05% комиссия + 0,02% проскальзывание на сторону) съедают всё, что даёт сигнал</p>
+  <p><strong>Цифры:</strong> BTC: 32 сделки, нетто −7,58%, винрейт 34,4%, макс. просадка 8,2% · ETH: 37 сделок, нетто −5,78%, винрейт 43,2%</p>
+  <p class="tags">осталось первичным правилом для форвардного теста: интересен ровно потому, что отрицательный результат честный</p>
+</article>
+<article>
+  <h2>R2 — пробой 20-барного максимума/минимума <span class="verdict">— отклонено</span></h2>
+  <p><strong>Проверено:</strong> 2026-10-14, то же окно</p>
+  <p><strong>Чем убито:</strong> ложные пробои на часовках: 37% и 33% попаданий, издержки добивают остаток</p>
+  <p><strong>Цифры:</strong> BTC: 46 сделок, нетто −7,65%, винрейт 37,0% · ETH: 43 сделки, нетто −12,67%, винрейт 32,6%</p>
+  <p class="tags">вторичное, в зачёт гейта не идёт</p>
+</article>
+<article>
+  <h2>R3 — возврат к границам Боллинджера (2σ) <span class="verdict">— отклонено</span></h2>
+  <p><strong>Проверено:</strong> 2026-10-14, то же окно</p>
+  <p><strong>Чем убито:</strong> правило торгует больше всех — 75 и 71 сделка: при 146 сделках только комиссии дают ≈20% издержек, которых у стратегии нет</p>
+  <p><strong>Цифры:</strong> BTC: 75 сделок, нетто −13,17%, винрейт 37,3%, просадка 13,5% · ETH: 71 сделка, нетто −13,84%, винрейт 35,2%, просадка 15,6%</p>
+  <p class="tags">вторичное, в зачёт гейта не идёт</p>
+</article>
+<footer class="site">
+  Код стенда и аудитора: <a href="https://github.com/XSlaidx/truth-engine">XSlaidx/truth-engine</a>
+  &middot; <a href="graveyard.html">кладбище правил</a>
+  &middot; обсуждение: <a href="https://t.me/gramwright_lab">@gramwright_lab</a>
+</footer>
+</body>
+</html>

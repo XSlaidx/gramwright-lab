@@ -19,5 +19,7 @@ article code{background:var(--code);padding:2px 5px;border-radius:4px;font-size:
 article pre{background:var(--code);padding:14px;border-radius:8px;overflow:auto}
 article pre code{background:none;padding:0}
 .tags{color:var(--muted);font-size:13px;margin-top:10px}
+.verdict{color:var(--muted);font-size:15px;font-weight:400}
+.intro{color:var(--muted);margin-bottom:26px}
 .meta{color:var(--muted);font-size:13px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 footer.site{border-top:1px solid var(--line);margin-top:44px;padding-top:18px;color:var(--muted);font-size:13px}
