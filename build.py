@@ -187,6 +187,7 @@ def page(title: str, body: str, *, description: str = SITE_DESC, path: str = "")
   Код стенда и аудитора: <a href="https://github.com/XSlaidx/truth-engine">XSlaidx/truth-engine</a>
   &middot; <a href="{path}graveyard.html">кладбище правил</a>
   &middot; обсуждение: <a href="{TELEGRAM}">@gramwright_lab</a>
+  &middot; принесли такой же алгоритм под ваш капитал? <a href="https://gramwright.pages.dev/audit/">независимая проверка заявленного результата</a>
 </footer>
 </body>
 </html>
