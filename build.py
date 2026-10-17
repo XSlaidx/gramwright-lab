@@ -186,6 +186,7 @@ def page(title: str, body: str, *, description: str = SITE_DESC, path: str = "")
 <footer class="site">
   Код стенда и аудитора: <a href="https://github.com/XSlaidx/truth-engine">XSlaidx/truth-engine</a>
   &middot; <a href="{path}graveyard.html">кладбище правил</a>
+  &middot; <a href="{path}customs.html">таможня</a>
   &middot; обсуждение: <a href="{TELEGRAM}">@gramwright_lab</a>
   &middot; принесли такой же алгоритм под ваш капитал? <a href="https://gramwright.pages.dev/audit/">независимая проверка заявленного результата</a>
 </footer>
@@ -270,8 +271,12 @@ def render_graveyard(entries: list[dict]) -> str:
 
 def build() -> dict[str, str]:
     posts = load_posts()
-    files = {"index.html": render_index(posts), "style.css": STYLE, "feed.xml": render_feed(posts),
+    import customs_page            # «Таможня»: страница собирается из данных проверки, а не из прозы
+    files = {"index.html": render_index(posts), "style.css": STYLE + customs_page.EXTRA_CSS,
+             "feed.xml": render_feed(posts),
              "graveyard.html": render_graveyard(load_graveyard()),
+             "customs.html": page("Таможня — досмотр заявленных результатов — " + SITE_TITLE,
+                                  customs_page.render_body()),
              ".nojekyll": ""}
     for post in posts:
         files[f"posts/{post.slug}.html"] = render_post(post)

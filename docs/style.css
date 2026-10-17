@@ -23,3 +23,14 @@ article pre code{background:none;padding:0}
 .intro{color:var(--muted);margin-bottom:26px}
 .meta{color:var(--muted);font-size:13px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 footer.site{border-top:1px solid var(--line);margin-top:44px;padding-top:18px;color:var(--muted);font-size:13px}
+/* «Таможня»: только то, чего нет в основном стиле — штампы и списки проверок */
+.c-ok{color:#3ecf8e;font-weight:600}
+.c-bad{color:#ef6b6b;font-weight:600}
+.c-warn{color:#e0b341;font-weight:600}
+.c-chk{list-style:none;padding-left:0;margin:10px 0}
+.c-chk li{padding-left:18px;position:relative;margin:5px 0;font-size:15px}
+.c-chk li.y::before{content:"\2713";position:absolute;left:0;color:#3ecf8e}
+.c-chk li.n::before{content:"\2717";position:absolute;left:0;color:#ef6b6b}
+.c-note{color:var(--muted);font-size:14px;border-left:2px solid var(--line);padding-left:10px;margin:16px 0}
+.c-conf{border:1px solid #ef6b6b55;border-radius:8px;padding:14px 16px;margin:22px 0}
+.c-conf h3{margin:0 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#ef6b6b}
