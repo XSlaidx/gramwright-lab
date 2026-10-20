@@ -544,13 +544,17 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
     # факта, чтобы «контур активен» не скрывало потерянный вход.
     # Записи до 20.10.2026 поля `tradable` не несли — тогда берём отметку из состояния контура:
     # пусть подпись опирается на факт, а не молчит до следующего прогона.
-    _blocked = ([s for s, v in symbols.items() if v.get("tradable") is False]
-                or list((_json("mt5-demo-state.json", {}) or {}).get("untradeable") or {}))
+    # Поле есть — верим журналу; поля нет (записи до 20.10.2026) — берём отметку из состояния.
+    # Раньше здесь стоял `or`: пустой список «всё торгуется» подменялся старым state.untradeable,
+    # и карточка продолжала называть недоступным уже заменённый инструмент.
+    _has_tradable = any(v.get("tradable") is not None for v in symbols.values())
+    _blocked = ([s for s, v in symbols.items() if v.get("tradable") is False] if _has_tradable
+                else list((_json("mt5-demo-state.json", {}) or {}).get("untradeable") or {}))
     if _blocked:
         parts.append(f"недоступны у брокера: {', '.join(_blocked)}")
     _skipped = [r for r in rows if r.get("kind") == "mt5_signal_skipped"]
     if _skipped:
-        parts.append(f"пропущено сигналов из-за недоступности: {len(_skipped)}")
+        parts.append(f"пропущено ранее из-за недоступности: {len(_skipped)}")
     else:
         parts.append(f"инструментов {len(symbols)} · рынок закрыт")
     # последний бар лежит внутри каждого инструмента, а не в корне записи
