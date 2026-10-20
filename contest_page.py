@@ -632,6 +632,29 @@ def _lock_cost_txt() -> str:
             else f"сэкономило {_num(abs(val), 2)} п.п.: пропущенные сделки в сумме дали минус")
 
 
+def _advisor_hyp_note() -> str:
+    """Строка об объявленной гипотезе выхода: когда, хеш, сколько сделок и ориентир.
+
+    Ориентир (что дали бы новые выходы на СТАРЫХ входах) подписан именно так: это число
+    посчитано после того, как минус по этим входам уже был известен, и подтверждением оно быть
+    не может. Результатом станут только сделки после даты объявления.
+    """
+    d = _json("advisor-exit-hypothesis.json") or {}
+    h = _json("advisor-exit-hint.json") or {}
+    if not d:
+        return ""
+    head = (f"Гипотеза выхода объявлена {str(d.get('declared_at'))[:16]} UTC, "
+            f"хеш {str(d.get('config_hash'))[:8]}: тейк 1 ATR вместо 1,5 и стоп в безубыток "
+            f"после +0,5 ATR.")
+    hint = ""
+    if h and h.get("hash") == d.get("config_hash"):
+        hint = (f" На тех же {h.get('n')} прежних входах новые выходы дали бы "
+                f"{_num(h.get('hyp_sum'), 2, plus=True)} п.п. вместо "
+                f"{_num(h.get('legacy_sum'), 2, plus=True)} — это ориентир, а не результат: "
+                f"входы те же, и минус по ним был известен заранее.")
+    return head + hint
+
+
 def _advisor_diag(adv: list[dict]) -> str:
     """Почему книга советника в минусе — числами, а не словами «модель ошиблась».
 
@@ -1144,8 +1167,14 @@ def render_body() -> str:
                       if r.get("kind") in ("blocked", "skip", "stale", "intent")
                       and r.get("ts") not in _lt_test), None)
     ai_ok = [r for r in ai if r.get("allowed")]
-    adv = [r for r in _lines("advisor-book.jsonl") if r.get("kind") == "trade"]
+    adv_all = [r for r in _lines("advisor-book.jsonl") if r.get("kind") == "trade"]
+    # Книга советника живёт в двух эпохах: до объявления гипотезы о выходе (стоп 1 ATR / тейк
+    # 1,5 ATR) и после (тейк 1 ATR + перенос стопа в безубыток). Смешивать их в одно число нельзя:
+    # тогда не видно, что изменилось, и старая выборка «подтверждает» новую гипотезу.
+    adv = [r for r in adv_all if r.get("exit_rule") != "be-v1"]
+    adv_hyp = [r for r in adv_all if r.get("exit_rule") == "be-v1"]
     adv_net = round(sum(float(r.get("net_pct") or 0) for r in adv), 2) if adv else None
+    adv_hyp_net = round(sum(float(r.get("net_pct") or 0) for r in adv_hyp), 2) if adv_hyp else None
     adv_coin = _json("advisor-coin.json") or {}
     # живой контур советника на демо Binance: своя книга и своё состояние
     bpath = os.path.join(os.path.dirname(DEMO), "binance-advisor-book.jsonl")
@@ -1811,10 +1840,17 @@ def render_body() -> str:
              # а у советника свои входы и своё число сделок. Раньше здесь стояла разница с медианой
              # монетки правила (−14,09 п.п.) — число, которое ничего не измеряло.
              (("контроль для этой книги не считается: броски монетки строятся по входам правила, "
-               "а у советника свои входы и своя выборка — сравнивать не с чем. "
-               + _advisor_diag(adv))
+               + "а у советника свои входы и своя выборка — сравнивать не с чем. "
+               + _advisor_diag(adv) + " " + _advisor_hyp_note())
               if adv_net is not None else ""),
              "#8a98a6"),
+        # Сделки по объявленной гипотезе выхода — отдельной строкой: иначе они растворятся
+        # в старой книге, и «−15,40 %» будет выглядеть как текущее состояние советника.
+        *([_row("бумага", "«LLM-советник» · новые выходы", _pct(adv_hyp_net),
+                f"{len(adv_hyp)} {_plural(len(adv_hyp))}",
+                "тейк 1 ATR + безубыток после +0,5 ATR · считается с даты объявления гипотезы",
+                "#8a98a6")]
+          if adv_hyp_net is not None else []),
         _row(okx_status, "OKX · исполнение (демо)",
              okx_val,
              (okx_sub if okx_live else
