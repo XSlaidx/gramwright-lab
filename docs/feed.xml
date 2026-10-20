@@ -4,6 +4,13 @@
   <link>https://XSlaidx.github.io/gramwright-lab</link>
   <description>Журнал проверки торговых гипотез: что проверяли, что вышло по факту, сколько съели издержки. Числа берутся из журнала стенда. Не инвестиционная рекомендация.</description>
   <item>
+    <title>Тест нарисовал +775 % — и всё равно провалил проверку</title>
+    <link>https://XSlaidx.github.io/gramwright-lab/posts/2026-10-20-test-narisoval-775-i-vse-ravno.html</link>
+    <guid>https://XSlaidx.github.io/gramwright-lab/posts/2026-10-20-test-narisoval-775-i-vse-ravno.html</guid>
+    <pubDate>Tue, 20 Oct 2026 00:00:00 +0000</pubDate>
+    <description>Три модели на часовых свечах BTC и ETH: A +775,9 %, B +274,4 %, C воспроизвела боевую до цифры. Все три проиграли владению на BTC; планка MinBTL 8,15 года при 7,1 в истории.</description>
+  </item>
+  <item>
     <title>Анатомия guard.py: как стенд не даёт боту сойти с ума ночью</title>
     <link>https://XSlaidx.github.io/gramwright-lab/posts/2026-10-14-anatomiya-guard.html</link>
     <guid>https://XSlaidx.github.io/gramwright-lab/posts/2026-10-14-anatomiya-guard.html</guid>

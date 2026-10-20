@@ -25,9 +25,13 @@ API = "https://api.bybit.com"
 
 RULE_C = "#4cc9f0"      # бот — голубой
 COIN_C = "#f59e0b"      # контроль — янтарный
-HOLD_C = "#c9a227"      # владение — тоже контроль, поэтому янтарная гамма, но темнее монетки
+HOLD_C = "#f472b6"      # владение: розовый — тот же цвет, что у карточки участника
 GRID_C = "#1c2a44"
-ZERO_C = "#3d4f6b"
+ADVISOR_C = "#8a98a6"   # советник: бумажная книга, серый — как на его карточке
+INV_C = "#f97316"       # «Наоборот»: те же входы, перевёрнутая сторона — цвет его карточки
+LIVE_C = "#a78bfa"      # живой счёт: фиолетовый — как на карточке и плашке состояния
+ZERO_C = "#5c7291"
+ZERO_TXT = "#9fb2cc"   # подпись нуля должна читаться, а не намекать
 INK_C = "#93a1b8"
 
 
@@ -100,7 +104,143 @@ def series() -> dict:
             "p95": [float(x) for x in rc["path_p95"]],
         }
 
-    return {"anchor": anchor, "stamps": stamps, "rule": rule, "holding": holding, "coin": coin}
+    advisor = _advisor_path()
+    live = _live_path()
+    inverse = _inverse_path()
+    return {"anchor": anchor, "stamps": stamps, "rule": rule, "holding": holding, "coin": coin,
+            "advisor": advisor, "live": live, "inverse": inverse}
+
+
+def _inverse_path():
+    """Контроль «Наоборот»: накопленный итог по времени выхода.
+
+    Точки считаются в bees/inverse_control.py по публичным свечам, поэтому ряд существует даже
+    там, где сделок не было: это расчёт, а не исполнение. На графике он пунктирный.
+    """
+    path = os.path.join(DEMO, "inverse-control-book.jsonl")
+    if not os.path.exists(path):
+        return None
+    stamps, acc, vals = [], 0.0, []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                stamps.append(int(rec.get("exit_ms") or rec.get("entry_ms") or 0))
+                acc += float(rec.get("net_pct") or 0)
+                vals.append(round(acc, 3))
+    except OSError:
+        return None
+    if not stamps:
+        return None
+    order = sorted(range(len(stamps)), key=lambda i: stamps[i])
+    return {"stamps": [stamps[i] for i in order], "values": [vals[i] for i in order]}
+
+
+def _advisor_path():
+    """Бумажная книга советника: накопленный итог по времени выхода."""
+    path = os.path.join(DEMO, "advisor-book.jsonl")
+    if not os.path.exists(path):
+        return None
+    trades = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("kind") == "trade":
+                    trades.append(rec)
+    except OSError:
+        return None
+    if not trades:
+        return None
+    trades.sort(key=lambda r: int(r.get("exit_ms") or 0))
+    stamps, acc, vals = [], 0.0, []
+    for rec in trades:
+        acc += float(rec.get("net_pct") or 0)
+        stamps.append(int(rec["exit_ms"]))
+        vals.append(round(acc, 3))
+    return {"stamps": stamps, "values": vals}
+
+
+def _live_path():
+    """Живой счёт: закрытые сделки с биржи (demo-state.json → closed), накопленный итог по времени выхода.
+
+    Отдельный ряд нужен потому, что линия «симуляция» и линия «живые ордера» — разные вещи, и до
+    18.10.2026 в легенде стояла подпись «правило, живые сделки» над кривой форвардной книги.
+    """
+    state = _json("demo-state.json", {}) or {}
+    trades = sorted((state.get("closed") or []), key=lambda t: int(t.get("exit_ms") or 0))
+    if not trades:
+        return None
+    stamps, acc, vals = [], 0.0, []
+    for t in trades:
+        acc += float(t.get("net_pct") or 0)
+        stamps.append(int(t["exit_ms"]))
+        vals.append(round(acc, 3))
+    return {"stamps": stamps, "values": vals}
+
+
+def _collapse(pairs):
+    """Один момент времени = одна ступенька.
+
+    Советник закрывает по несколько сделок в один час (например, сработал тайм-стоп у сетки).
+    Раньше на каждый выход рисовалась своя ступенька с тем же X — получался вертикальный «забор»
+    из маркеров. Здесь выходы одного момента складываются, и остаётся финальный итог на это время.
+    """
+    out = []
+    for ms, v in sorted(pairs, key=lambda p: p[0]):
+        if out and out[-1][0] == ms:
+            out[-1] = (ms, v)
+        else:
+            out.append((ms, v))
+    return out
+
+
+def _px_collapse(pts, sx, max_run: int = 2):
+    """Склеивает точки, попавшие в один пиксель по X.
+
+    Время сделок — минуты, а ширина графика ~900 px на несколько суток: два разных момента могут
+    дать одинаковую координату. Без склейки это снова «забор» из вертикальных отрезков.
+    """
+    out: list[tuple[float, float]] = []
+    for ms, v in pts:
+        x = round(sx(ms), 1)
+        run, i = 0, len(out) - 1
+        while i >= 0 and out[i][0] == x:      # сколько точек уже стоит в этом пикселе
+            run += 1
+            i -= 1
+        # Две точки на пиксель — это ступенька (было → стало). Третья и дальше — уже «забор»,
+        # поэтому она не добавляется, а заменяет последнюю точку пикселя.
+        if run >= max_run:
+            out[-1] = (x, v)
+        else:
+            out.append((x, v))
+    return out
+
+
+def _step_points(anchor: int, pairs, now_ms: int):
+    """Ступенчатый путь: (X, было) → (X, стало) … и полка до «сейчас»."""
+    pts, prev_v, last_ms = [(anchor, 0.0)], 0.0, anchor
+    for ms, v in _collapse(pairs):
+        if ms <= anchor:                 # выход раньше начала окна — не рисуем назад
+            prev_v = v
+            continue
+        pts.append((ms, prev_v))
+        pts.append((ms, v))
+        prev_v, last_ms = v, ms
+    pts.append((max(last_ms, now_ms), prev_v))
+    return pts, prev_v
 
 
 def _fmt_day(ms: int) -> str:
@@ -118,12 +258,22 @@ def chart(width: int = 900, height: int = 330) -> str:
     if d["coin"]:
         pts += list(zip(d["coin"]["steps"], d["coin"]["p05"]))
         pts += list(zip(d["coin"]["steps"], d["coin"]["p95"]))
+    if d.get("advisor"):
+        pts.append((d["anchor"], 0.0))
+        pts += list(zip(d["advisor"]["stamps"], d["advisor"]["values"]))
+    if d.get("live"):
+        pts.append((d["anchor"], 0.0))
+        pts += list(zip(d["live"]["stamps"], d["live"]["values"]))
+    if d.get("inverse"):
+        pts.append((d["anchor"], 0.0))
+        pts += list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
     if not pts:
         return ('<div class="eq-empty">Кривых пока нет: в форвардной книге нет закрытых сделок.</div>')
 
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
-    x0, x1 = min(xs), max(xs)
+    now_ms = int(time.time() * 1000)
+    x0, x1 = min(xs), max(max(xs), now_ms)      # ось доходит до «сейчас»: простой видно, а не прячем
     lo, hi = min(ys + [0.0]), max(ys + [0.0])
     pad_y = (hi - lo) * 0.14 or 0.6
     lo, hi = lo - pad_y, hi + pad_y
@@ -139,9 +289,28 @@ def chart(width: int = 900, height: int = 330) -> str:
     def sy(v: float) -> float:
         return T + (hi - v) / (hi - lo) * H
 
+    last_txt = _pct_txt(d["rule"][-1]) if d["rule"] else "нет сделок"
+    # aria-label перечисляет ВСЕ серии, которые реально нарисованы, с их последними значениями:
+    # незрячий читатель должен получить то же, что видит глаз, а не устаревшую подпись.
+    _parts = ["путь правила"]
+    if d.get("live"):
+        _parts.append("живой счёт (исполнено биржей)")
+    if d.get("advisor"):
+        _parts.append("советник, бумажная книга")
+    _parts.append("полоса случайной монетки 5–95 %")
+    _parts.append("линия владения")
+    if d.get("inverse"):
+        _parts.append("пунктир «Наоборот» — те же входы советника с перевёрнутой стороной")
+    _ends = [f"правило {last_txt}"]
+    if d.get("live"):
+        _ends.append(f"живой счёт {_pct_txt(d['live']['values'][-1])}")
+    if d.get("advisor"):
+        _ends.append(f"советник {_pct_txt(d['advisor']['values'][-1])}")
+    if d.get("inverse"):
+        _ends.append(f"наоборот {_pct_txt(d['inverse']['values'][-1])}")
+    aria = "График: " + ", ".join(_parts) + ". Последние точки: " + ", ".join(_ends)
     out = [f'<svg class="eq" viewBox="0 0 {width} {height}" role="img" '
-           f'aria-label="Путь правила, полоса случайной монетки и линия владения" '
-           f'preserveAspectRatio="xMidYMid meet">']
+           f'aria-label="{aria}" preserveAspectRatio="xMidYMid meet">']
 
     # сетка по Y и подписи процентов
     step = 1.0
@@ -160,12 +329,22 @@ def chart(width: int = 900, height: int = 330) -> str:
     # нулевая линия — заметнее остальных
     if lo < 0 < hi:
         y = sy(0)
-        out.append(f'<line x1="{L}" y1="{y:.1f}" x2="{L + W}" y2="{y:.1f}" stroke="{ZERO_C}" stroke-width="1.5" '
-                   f'stroke-dasharray="4 3"/>')
+        out.append(f'<line x1="{L}" y1="{y:.1f}" x2="{L + W}" y2="{y:.1f}" stroke="{ZERO_C}" '
+                   f'stroke-opacity="0.95" stroke-width="2" stroke-dasharray="6 4"/>')
+        out.append(f'<text x="{L + W - 2:.1f}" y="{y - 5:.1f}" fill="{ZERO_C}" font-size="11" '
+                   f'text-anchor="end">0 — граница прибыли и убытка</text>')
+        out[-1] = out[-1].replace(f'fill="{ZERO_C}"', f'fill="{ZERO_TXT}"')
 
     # полоса монетки: сверху p95, снизу p05 обратным ходом
     if d["coin"]:
         st, p05, p95 = d["coin"]["steps"], d["coin"]["p05"], d["coin"]["p95"]
+        # Полоса строится по входам правила: когда правило перестало торговать, массив кончался
+        # и заливка обрывалась «тупиком». Продлеваем последние значения до правого края, как и линии.
+        if st and max(st) < now_ms:
+            st = list(st) + [now_ms]
+            p05 = list(p05) + [p05[-1]]
+            p95 = list(p95) + [p95[-1]]
+            d["coin"]["p50"] = list(d["coin"]["p50"]) + [d["coin"]["p50"][-1]]
         top = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in zip(st, p95))
         bot = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in reversed(list(zip(st, p05))))
         out.append(f'<polygon points="{top} {bot}" fill="{COIN_C}" fill-opacity="0.13" '
@@ -180,30 +359,113 @@ def chart(width: int = 900, height: int = 330) -> str:
         out.append(f'<polyline points="{h}" fill="none" stroke="{HOLD_C}" stroke-width="2" '
                    f'stroke-opacity="0.85" stroke-linejoin="round"/>')
 
+    # «Наоборот» — контроль: те же входы советника, сторона перевёрнута. Пунктир = расчёт по свечам,
+    # биржа этих сделок не исполняла, поэтому линия визуально отличается от живых.
+    if d.get("inverse"):
+        pairs = list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
+        pts_i, prev_v = _step_points(d["anchor"], pairs, now_ms)
+        i_pts = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in _px_collapse(pts_i, sx))
+        out.append(f'<polyline points="{i_pts}" fill="none" stroke="{INV_C}" stroke-width="2.2" '
+                   f'stroke-opacity="0.95" stroke-dasharray="6 4" stroke-linejoin="miter" '
+                   f'stroke-linecap="butt"/>')
+        for ms, v in _collapse(pairs):
+            if ms <= d["anchor"]:
+                continue
+            out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="2.6" fill="{INV_C}">'
+                       f'<title>{_fmt_day(int(ms))} · наоборот {v:+.2f} %</title></circle>')
+        _last = _collapse(pairs)[-1][0]
+        out.append(f'<circle cx="{sx(_last):.1f}" cy="{sy(prev_v):.1f}" r="4" '
+                   f'fill="none" stroke="{INV_C}" stroke-width="2">'
+                   f'<title>наоборот · итог {prev_v:+.2f} %</title></circle>')
+
+    # советник (бумажная книга): один момент выхода = одна ступенька
+    if d.get("advisor"):
+        pairs = list(zip(d["advisor"]["stamps"], d["advisor"]["values"]))
+        pts_a, prev_v = _step_points(d["anchor"], pairs, now_ms)
+        a = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in _px_collapse(pts_a, sx))
+        out.append(f'<polyline points="{a}" fill="none" stroke="{ADVISOR_C}" stroke-width="2.4" '
+                   f'stroke-opacity="0.95" stroke-linejoin="miter"/>')
+        for ms, v in _collapse(pairs):
+            if ms <= d["anchor"]:
+                continue
+            n = sum(1 for m, _ in pairs if m == ms)
+            more = f" ({n} сделки)" if n > 1 else ""
+            out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="3" fill="{ADVISOR_C}">'
+                       f'<title>{_fmt_day(int(ms))} · советник {v:+.2f} %{more}</title></circle>')
+        _last = _collapse(pairs)[-1][0]
+        out.append(f'<circle cx="{sx(_last):.1f}" cy="{sy(prev_v):.1f}" r="4" fill="none" '
+                   f'stroke="{ADVISOR_C}" stroke-width="2">'
+                   f'<title>советник · итог {prev_v:+.2f} %</title></circle>')
+
+    # живой счёт: ступенчатая линия, точки — исполнения биржи
+    if d.get("live"):
+        pairs = list(zip(d["live"]["stamps"], d["live"]["values"]))
+        pts_l, prev_v = _step_points(d["anchor"], pairs, now_ms)
+        line = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in _px_collapse(pts_l, sx))
+        out.append(f'<polyline points="{line}" fill="none" stroke="{LIVE_C}" stroke-width="2.2" '
+                   f'stroke-opacity="0.95" stroke-dasharray="2 0" stroke-linejoin="miter">'
+                   f'<title>живой счёт: исполнено биржей</title></polyline>')
+        for ms, v in _collapse(pairs):
+            if ms <= d["anchor"]:
+                continue
+            out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="3.2" fill="{LIVE_C}">'
+                       f'<title>{_fmt_day(int(ms))} · живой счёт {v:+.2f} %</title></circle>')
+
     # правило
     if d["rule"]:
         r = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in zip([d["anchor"]] + d["stamps"], [0.0] + d["rule"]))
         out.append(f'<polyline points="{r}" fill="none" stroke="{RULE_C}" stroke-width="2.6" '
                    f'stroke-linejoin="round" stroke-linecap="round"/>')
         last_ms, last_v = d["stamps"][-1], d["rule"][-1]
-        out.append(f'<circle cx="{sx(last_ms):.1f}" cy="{sy(last_v):.1f}" r="4" fill="{RULE_C}"/>')
+        if now_ms > last_ms:
+            out.append(f'<line x1="{sx(last_ms):.1f}" y1="{sy(last_v):.1f}" x2="{sx(now_ms):.1f}" '
+                       f'y2="{sy(last_v):.1f}" stroke="{RULE_C}" stroke-width="2.6" stroke-opacity="0.45"/>')
+        for ms_t, v_t in zip(d["stamps"], d["rule"]):
+            tip = f"{_fmt_day(int(ms_t))} · {_pct_txt(v_t)} накопленным итогом"
+            out.append(f'<circle cx="{sx(ms_t):.1f}" cy="{sy(v_t):.1f}" r="2.6" fill="{RULE_C}" '
+                       f'fill-opacity="0.8"><title>{tip}</title></circle>')
+        out.append(f'<circle cx="{sx(last_ms):.1f}" cy="{sy(last_v):.1f}" r="4.5" fill="{RULE_C}">'
+                   f'<title>последняя сделка · {last_v:+.2f} %</title></circle>')
 
-    # подписи дат
-    for frac in (0.0, 0.5, 1.0):
-        ms = x0 + (x1 - x0) * frac
-        anchor = "start" if frac == 0 else ("end" if frac == 1 else "middle")
-        out.append(f'<text x="{sx(ms):.1f}" y="{height - 8}" fill="{INK_C}" font-size="11" '
-                   f'text-anchor="{anchor}">{_fmt_day(int(ms))}</text>')
+    # метка «сейчас»: читатель должен видеть, что график живой, а книга — нет
+    if now_ms > x0:
+        out.append(f'<line x1="{sx(now_ms):.1f}" y1="{T}" x2="{sx(now_ms):.1f}" y2="{T + H}" '
+                   f'stroke="{INK_C}" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="3 4"/>')
+        out.append(f'<text x="{sx(now_ms) - 4:.1f}" y="{T + 12}" fill="{INK_C}" font-size="11" '
+                   f'text-anchor="end">сейчас</text>')
+
+    # сетка по дням: три подписи на длинном окне не дают понять, где что
+    day = 86_400_000
+    span_days = (x1 - x0) / day
+    step_days = 1 if span_days <= 8 else (2 if span_days <= 18 else (7 if span_days <= 60 else 30))
+    tick = (x0 // day) * day
+    while tick <= x1:
+        if tick >= x0:
+            x = sx(tick)
+            out.append(f'<line x1="{x:.1f}" y1="{T}" x2="{x:.1f}" y2="{T + H}" '
+                       f'stroke="{INK_C}" stroke-opacity="0.10" stroke-width="1"/>')
+            out.append(f'<text x="{x:.1f}" y="{height - 8}" fill="{INK_C}" font-size="11" '
+                       f'text-anchor="middle">{_fmt_day(int(tick))}</text>')
+        tick += step_days * day
 
     out.append("</svg>")
     return "".join(out)
 
 
 def legend() -> str:
+    d = series()
+    advisor = (f'<span><i style="background:{ADVISOR_C}"></i>советник, бумажная книга</span>'
+               if d.get("advisor") else "")
+    live = (f'<span><i style="background:{LIVE_C}"></i>живой счёт: исполнено биржей</span>'
+            if d.get("live") else "")
+    inverse = (f'<span><i style="background:{INV_C}"></i>«Наоборот»: те же входы советника, '
+               f'сторона перевёрнута (расчёт по свечам)</span>' if d.get("inverse") else "")
     return ('<div class="eq-legend">'
-            f'<span><i style="background:{RULE_C}"></i>правило, живые сделки</span>'
+            f'<span><i style="background:{RULE_C}"></i>правило, симуляция «Тренд»</span>'
+            + live + advisor +
             f'<span><i style="background:{COIN_C};opacity:.75"></i>монетка: 5–95 % из 200 путей</span>'
             f'<span><i style="background:{HOLD_C}"></i>владение: купить и держать</span>'
+            + inverse +
             '</div>')
 
 
@@ -217,6 +479,8 @@ def spark(kind: str, w: int = 132, h: int = 34) -> str:
         vals, color = [0.0] + d["rule"], RULE_C
     elif kind == "hold" and d["holding"]:
         vals, color = [0.0] + list(d["holding"]), HOLD_C
+    elif kind == "advisor" and d.get("advisor"):
+        vals, color = [0.0] + d["advisor"]["values"], ADVISOR_C
     elif kind == "coin" and d["coin"]:
         vals, color = [0.0] + list(d["coin"]["p50"]), COIN_C
     else:
@@ -247,3 +511,46 @@ if __name__ == "__main__":
     d = series()
     print(f"  точек: стопы={len(d['stamps'])} правило={d['rule'][-1] if d['rule'] else None} "
           f"владение={(d['holding'] or [None])[-1]} монетка={(d['coin'] or {}).get('p50', [None])[-1]}")
+
+def _pct_txt(v: float, digits: int = 2) -> str:
+    """Проценты для подсказок и aria: запятая и типографский минус, как во всём тексте."""
+    return f"{v:+.{digits}f}".replace("-", "−").replace(".", ",") + " %"
+
+
+def stale_note(opens: list[str] | None = None) -> str:
+    """Почему график плоский: сколько часов нет закрытых сделок.
+
+    19.10.2026 сноска говорила «новых входов с тех пор не было», хотя прямо над графиком висела
+    плашка открытой позиции. Причина: сноска читала только `opens`, а состояние могло лежать в
+    старом поле `open`. Теперь открытые позиции передаёт вызывающий код, а чтение состояния —
+    запасной путь.
+    """
+    d = series()
+    if not d["stamps"]:
+        return "Закрытых сделок ещё нет — сравнивать пока нечего."
+    last = max(d["stamps"])
+    hours = (time.time() * 1000 - last) / 3_600_000
+    when = time.strftime("%d.%m %H:%M", time.gmtime(last / 1000))
+    if hours < 2:
+        return f"Последняя сделка {when} UTC · контур активен."
+    # «Сигналов не было» было неправдой: в это время открывалась живая позиция, и советник давал
+    # сигнал. Формулировка теперь смотрит на состояние, а не на догадку (аудит 18.10.2026).
+    if not opens:
+        demo_path = os.path.join(os.path.dirname(HERE), "bybit-demo", "demo-state.json")
+        try:
+            demo = json.load(open(demo_path, encoding="utf-8"))
+            raw = dict(demo.get("opens") or {})
+            if not raw and demo.get("open"):          # старое поле на случай миграции
+                raw = {"позиция": demo["open"]}
+            opens = [f"{k} {'лонг' if float(v.get('side_sign') or 0) > 0 else 'шорт'}"
+                     for k, v in raw.items()]
+        except (OSError, ValueError):
+            opens = []
+    tail = ("Новых входов с тех пор не было." if not opens else
+            "Открытая позиция " + ", ".join(opens) + " в график не входит — кривая строится только "
+            "по зафиксированному PnL.")
+    tail_close = ("незакрытая позиция в неё не входит." if opens
+                  else "она строится по закрытым сделкам.")
+    return (f"Последняя закрытая сделка {when} UTC · прошло {hours:.0f} ч. {tail} "
+            f"Кривая поэтому и стоит на месте: {tail_close}")
+

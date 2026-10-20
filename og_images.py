@@ -14,7 +14,10 @@ import os
 import subprocess
 import sys
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):   # крон подменяет stdout на StringIO
+    pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -94,6 +97,9 @@ def cards() -> list[dict]:
          "sub": (f"монетка: {_pct(rc.get('random_p05_pct'))} … {_pct(rc.get('random_p95_pct'))}"
                  if rc else "контроль не посчитан"),
          "tags": ["преимущество не показано" if rc else "нет данных", "рейтинга нет до 30 сделок"]},
+        {"slug": "lab-funding", "title": "Премия за плечо: шорт перпа против спота",
+         "big": "+9,23 %", "sub": "в год на ноционал: 15 монет, 7 лет, после издержек — плата за риск, не мастерство",
+         "tags": ["15 из 15 положительных", "выжила в 2022", "сжимается"]},
         {"slug": "lab-seal", "title": "Проверьте сами: журнал и внешняя метка времени",
          "big": "FreeTSA", "sub": "пломба на манифест с хешами, проверка повторяется одной командой",
          "tags": ["RFC 3161", "только дозапись"]},

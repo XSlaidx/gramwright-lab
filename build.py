@@ -300,8 +300,14 @@ def check(files: dict[str, str]) -> list[str]:
     for root, _dirs, names in os.walk(DOCS_DIR):
         for name in names:
             relative = os.path.relpath(os.path.join(root, name), DOCS_DIR).replace("\\", "/")
-            if relative not in files:
-                drift.append(f"{relative} (лишний файл)")
+            if relative in files:
+                continue
+            # Картинки собирают другие скрипты (og_images.py, customs_page.py), а не build.py.
+            # Раньше любая такая картинка считалась «лишним файлом», и публикация поста падала
+            # на шаге проверки — пост уже в канале, а репозиторий и зеркало не обновлены.
+            if relative.startswith("img/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico")):
+                continue
+            drift.append(f"{relative} (лишний файл)")
     return drift
 
 
