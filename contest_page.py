@@ -29,7 +29,11 @@ API = "https://api.bybit.com"
 # ── Вкладки: три слоя вместо простыни на 15 экранов ─────────────────────────────
 # Вкладка не прячет данные от тех, у кого нет JS: панели по умолчанию видны, скрипт их схлопывает.
 TABS_CSS = """
-.tnav{position:sticky;top:0;z-index:20;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;
+/* top = ИЗМЕРЕННАЯ высота липкой шапки сайта (.gnav): 61px на десктопе, 62px на 700px
+   (замер в браузере 20.10.2026). Было top:0 — вкладки при прокрутке прятались ПОД шапку,
+   у которой z-index 50. Первая правка ставила 47px по расчёту от отступов, и в браузере
+   осталось перекрытие 14px — расчёт не совпал с реальной высотой. Берём 62px. */
+.tnav{position:sticky;top:62px;z-index:20;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;
  margin:18px auto 10px;padding:8px;max-width:1180px;background:rgba(11,15,20,.86);
  backdrop-filter:blur(6px);border:1px solid var(--bd,#1b2632);border-radius:14px}
 .tnav button{font:inherit;font-size:15px;padding:9px 16px;border-radius:10px;cursor:pointer;
@@ -121,6 +125,10 @@ RECON_CSS = """
    табличную раскладку только этому окну; горизонтальную прокрутку берёт на себя обёртка. */
 @media(max-width:700px){
   .table-wrap-recon table.tr{display:table;width:100%;overflow:visible;white-space:normal}
+  /* На телефоне окно с собственной прокруткой ловит вертикальный жест: палец крутит таблицу, а
+     страница стоит. Ниже 700px окно раскрывается целиком — прокрутка одна, страничная. */
+  .table-wrap-recon{max-height:none;overflow:visible;border:0;border-radius:0}
+  .table-wrap-recon table.tr th{position:static}
   .table-wrap-recon table.tr th,.table-wrap-recon table.tr td{white-space:normal}
 }
 """
@@ -212,17 +220,8 @@ details.how p{margin:6px 0 0;line-height:1.6;max-width:900px}
   .rname{font-size:14.5px}
   .rval .rn{white-space:normal}
 }
-.cn-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:12px;margin:16px 0 0}
-.cn-card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--c,var(--line));
-  border-radius:12px;padding:14px 15px 15px;display:flex;flex-direction:column}
-.cn-card .em{color:var(--c,var(--acc));height:58px}
-.cn-card .em svg{width:56px;height:56px}
-.cn-card .nm{font-weight:700;margin-top:6px;color:#fff}
-.cn-card .rl{color:var(--mut);font-size:13px;line-height:1.45;margin-top:4px}
-.cn-card .big{font-size:25px;font-weight:760;color:#fff;margin-top:12px;line-height:1.1}
-.cn-card .nb{color:var(--mut);font-size:12.5px;margin-top:4px;line-height:1.4}
-.cn-card .tg{margin-top:auto;padding-top:12px;font-size:12.5px;color:var(--mut)}
-.cn-card .tg i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);
+/* .cn-card / .cn-grid удалены 20.10.2026 вместе с функцией _card(): её никто не вызывал,
+   а правило висело в CSS и путало ревью. */
   margin-right:7px}
 
 .ai{display:grid;grid-template-columns:auto 1fr;gap:6px 22px;background:#0e1729;
@@ -272,37 +271,6 @@ details.how p{margin:6px 0 0;line-height:1.6;max-width:900px}
 }
 """
 
-EMBLEM = {
-    "trend": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><path d="M16 40 48 24l32 16v34L48 90 16 74z"/>
-      <path d="M16 40l32 16 32-16"/><path d="M48 56v34"/><path d="M48 40V20M40 28l8-8 8 8"/></svg>""",
-    "random": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="48" r="28"/>
-      <path d="M48 22v8M48 66v8"/>
-      <path d="M40 40h12a6 6 0 0 1 0 12H40m0 0h14a6 6 0 0 1 0 12H40V34"/></svg>""",
-    "hold": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><rect x="22" y="44" width="52" height="38" rx="7"/>
-      <path d="M34 44V32a14 14 0 0 1 28 0v12"/>
-      <circle cx="48" cy="60" r="4.5" fill="currentColor" stroke="none"/><path d="M48 64v8"/></svg>""",
-    "ai": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><path d="M28 58h40v12a20 20 0 0 1-40 0z"/>
-      <path d="M28 58a20 20 0 0 1 40 0"/><circle cx="48" cy="44" r="5"/>
-      <path d="M20 34h8M68 34h8M48 30V18"/></svg>""",
-    "mt5": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="20" width="68" height="46" rx="5"/>
-      <path d="M22 54l12-13 10 8 12-18 12 11"/><path d="M22 74h52M34 82h28"/></svg>""",
-    "live": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><path d="M20 52l14 14 40-40"/>
-      <path d="M20 30h18" opacity=".55"/><path d="M20 74h26" opacity=".35"/></svg>""",
-    "binance": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><path d="M48 16l16 16-16 16-16-16z"/>
-      <path d="M20 44l12 12-12 12-12-12z" transform="translate(4 0)"/>
-      <path d="M76 44l12 12-12 12-12-12z" transform="translate(-4 0)"/></svg>""",
-    "learned": """<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.2"
-      stroke-linecap="round" stroke-linejoin="round"><circle cx="26" cy="26" r="7"/>
-      <circle cx="26" cy="70" r="7"/><circle cx="70" cy="48" r="7"/>
-      <path d="M31 31l32 13M31 65l32-13"/><circle cx="48" cy="48" r="3.5" fill="currentColor" stroke="none"/></svg>""",
-}
 
 
 def _e(x) -> str:
@@ -532,7 +500,10 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
     bars = [f"{s}: баров {v.get('bars')}" for s, v in list(symbols.items())[:1]]
     acct = str(last.get("account") or "")
     # Номер счёта — не наш секрет, но и не то, что стоит публиковать целиком: хватает хвоста.
-    parts = [f"счёт {acct or '—'} · {last.get('server')}",
+    # Номер счёта в открытом виде не публикуем: он не секрет, но и не то, что должно лежать на
+    # странице. Хватает хвоста, чтобы владелец узнал свой счёт, и этого мало, чтобы его найти.
+    _acct_tail = f"…{acct[-4:]}" if len(acct) >= 4 else "…"
+    parts = [f"счёт {_acct_tail or '—'} · {last.get('server')}",
              f"эквити {_thousands(last.get('equity'))}"]
     shut = [s for s, v in symbols.items() if not v.get("market_open")]
     if live and shut:
@@ -552,6 +523,14 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
                 else list((_json("mt5-demo-state.json", {}) or {}).get("untradeable") or {}))
     if _blocked:
         parts.append(f"недоступны у брокера: {', '.join(_blocked)}")
+    # Клиринг: у золота торговли нет каждый день несколько часов, и цена на открытии может
+    # прыгнуть сильнее нашего стопа (1 ATR). Читатель должен это видеть, а не выяснять сам.
+    for _s, _v in symbols.items():
+        _c = _v.get("clearing")
+        if _c:
+            parts.append(f"{_s}: клиринг {_c['from']}–{_c['to']} (сервер), гэп на открытии "
+                         f"{_num(_c.get('gap_avg_pct'), 2)} % в среднем "
+                         f"(худший {_num(_c.get('gap_max_pct'), 2)} %)")
     _skipped = [r for r in rows if r.get("kind") == "mt5_signal_skipped"]
     if _skipped:
         parts.append(f"пропущено ранее из-за недоступности: {len(_skipped)}")
@@ -630,6 +609,27 @@ def _lock_cost_txt() -> str:
     # минус», то есть одно и то же событие называлось и потерей, и экономией (аудит 18.10.2026).
     return (f"стоило {_num(abs(val), 2)} п.п. упущенного хода" if val > 0
             else f"сэкономило {_num(abs(val), 2)} п.п.: пропущенные сделки в сумме дали минус")
+
+
+def _a_choice_note() -> str:
+    """Почему A выбран long-only — датой, хешем и цифрами, а не «так лучше».
+
+    Ревью поймало справедливо: сторона выбрана по ретроспективе (лонги лучше шортов при t = 3,74),
+    и без датировки это выглядит как подгонка под уже известный результат.
+    """
+    d = _json("model-a-choice.json") or {}
+    if not d:
+        return ""
+    lg, sh = d.get("longs") or {}, d.get("shorts") or {}
+    decl = d.get("declaration") or {}
+    return (f"Сторона выбрана по ретроспективе: лонги {_num(lg.get('mean_pct'), 3, plus=True)} % "
+            f"(t = {_num(lg.get('t'), 2)}, n = {lg.get('n')}) против шортов "
+            f"{_num(sh.get('mean_pct'), 3, plus=True)} % (t = {_num(sh.get('t'), 2)}, "
+            f"n = {sh.get('n')}), разница {_num(d.get('difference_pct_points'), 3, plus=True)} п.п. "
+            f"при t = {_num(d.get('t_difference'), 2)}. Записано {str(d.get('recorded_at'))[:16]} UTC, "
+            f"хеш конфига {str(decl.get('config_hash'))[:8]}, форвард начат "
+            f"{str(d.get('forward_started'))[:16]} — то есть после объявления. "
+            f"Ретроспектива — ориентир, а не подтверждение.")
 
 
 def _model_window_note() -> str:
@@ -1121,15 +1121,6 @@ def _model_facts() -> dict:
     except Exception as e:                                   # noqa: BLE001
         print(f"  внимание: числа модели не прочитаны ({e})")
         return {}
-
-
-def _card(key: str, color: str, name: str, rule: str, big: str, note: str, tag: str,
-          spark: str = "") -> str:
-    return (f'<div class="cn-card" role="group" aria-label="{_e(name)}: {_e(big)}" '
-            f'style="--c:{color}"><div class="em">{EMBLEM[key]}</div>'
-            f'<div class="nm">{_e(name)}</div><div class="rl">{_e(rule)}</div>'
-            f'<div class="big">{big}</div>{spark}<div class="nb">{_e(note)}</div>'
-            f'<div class="tg"><i></i>{_e(tag)}</div></div>')
 
 
 def render_body() -> str:
@@ -1846,7 +1837,7 @@ def render_body() -> str:
     model_rows = "".join([
         _model_row("model-a", "«A» long-only", "бумага", "#22c55e",
                    "Вход только в лонг при p ≥ 0,60; выходы считает код (стоп 1 ATR, тейк 1,5 ATR, "
-                   "тайм-стоп 48 баров)."),
+                   "тайм-стоп 48 баров). " + _a_choice_note()),
         _model_row("model-b", "«B» бустинг", "контроль", "#eab308",
                    "КОНТРОЛЬ, не участник: нелинейная модель на тех же признаках, обе стороны. "
                    "Стоит, чтобы видеть, помогает ли нелинейность."),
@@ -2199,9 +2190,9 @@ def render_body() -> str:
 <details class="how"><summary>Как считается</summary>
 <p>«LLM-советник» — бумажная книга: модель задаёт только направление, выходы считает код.</p>
 <p>«A» long-only и «B» бустинг — те же 14 признаков из часовых свечей, horizon 12 баров, порог 0,60.
-Разница: A входит только в лонг (разведка показала брутто лонгов +0,46 % против −0,16 % у шортов,
-t = 3,74), B — обе стороны нелинейной моделью и стоит контролем: он отвечает, помогает ли
-нелинейность вообще. Выходы и издержки у всех одинаковые.</p></details>
+Разница: A входит только в лонг, B — обе стороны нелинейной моделью и стоит контролем: он отвечает,
+помогает ли нелинейность вообще. Выходы и издержки у всех одинаковые.</p>
+<p>{_a_choice_note()}</p>
 {does}
 </div>
 <div class="tpane" id="tabpane-1" role="tabpanel" aria-labelledby="tabbtn-1" data-tab="1" data-active="0">

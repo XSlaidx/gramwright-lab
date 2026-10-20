@@ -59,9 +59,17 @@ def underwater_svg(points: list[float], color: str = "#f87171",
         return pad - (h * (v / span))
     path = " ".join(f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for i, v in enumerate(points))
     area = path + f" L{x(n - 1):.1f},{pad} L{x(0):.1f},{pad} Z"
-    return (f'<svg class="uw" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img">'
+    # preserveAspectRatio="none" растягивает картинку по осям — вместе с ней растягивалась и
+    # толщина линии: на широком блоке она становилась толще, на узком тоньше. vector-effect
+    # держит 2px независимо от масштаба. aria-label обязателен: role="img" без имени читалка
+    # объявляет просто «image».
+    label = (f"Подводная кривая: глубина от исторического максимума, "
+             f"худшая точка {abs(lo):.2f} п.п.")
+    return (f'<svg class="uw" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img" '
+            f'aria-label="{label}">'
             f'<path d="{area}" fill="{color}" opacity=".16"/>'
-            f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2"/></svg>')
+            f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" '
+            f'vector-effect="non-scaling-stroke"/></svg>')
 
 
 def calibration(model_path: str, run_prefix: str = "мейкер: вся история") -> dict:
