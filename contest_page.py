@@ -84,6 +84,44 @@ TAB_NAV = """
 </script>
 """
 
+# ── «Живая книга против симуляции»: воронка сверху, окно таблицы снизу ─────────────
+# Зачем: при 100 сделках 90 % строк — «исполнено» с расхождением в 2–3 б.п. Портянка съедает
+# внимание читателя, а вопросы аудита простые: сколько совпало, сколько контур пропустил и
+# почём это стоило. Агрегат отвечает на них до прокрутки, метки — расшифровывают причину.
+# Окно прокрутки ограничено 380 px (≈9 строк), шапка липкая, полоса прокрутки видимая:
+# прошлый раз max-height спрятал свежие строки молча — теперь это проверяется clip_check.js.
+RECON_CSS = """
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 14px;max-width:960px}
+.kpi{flex:1 1 200px;min-width:170px;border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;background:var(--panel)}
+.kpi .v{font-size:20px;font-weight:600;line-height:1.25}
+.kpi .l{color:var(--mut);font-size:12.5px;margin-top:3px}
+.kpi.ok .v{color:var(--ok)} .kpi.warn .v{color:var(--warn)} .kpi.acc .v{color:var(--acc)}
+.table-wrap-recon{max-height:380px;overflow-y:auto;overflow-x:auto;border:1px solid var(--line);
+  border-radius:10px;scrollbar-width:thin;scrollbar-color:#3b4a67 var(--panel)}
+.table-wrap-recon table.tr{border-collapse:separate;border-spacing:0;width:100%}
+.table-wrap-recon table.tr th{position:sticky;top:0;z-index:2;background:var(--panel);
+  box-shadow:inset 0 -1px 0 var(--line)}
+.table-wrap-recon::-webkit-scrollbar{width:12px;height:12px}
+.table-wrap-recon::-webkit-scrollbar-track{background:var(--panel)}
+.table-wrap-recon::-webkit-scrollbar-thumb{background:#3b4a67;border-radius:6px;border:3px solid var(--panel)}
+.recon-cap{color:var(--mut);font-size:12.5px;margin:6px 0 0;max-width:960px}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1.6;
+  border:1px solid transparent;white-space:nowrap;cursor:help}
+.tag-ok{color:var(--ok);border-color:#2b4a35;background:#12251a}
+.tag-warn{color:var(--warn);border-color:#4a3a17;background:#241c0d}
+.tag-bad{color:var(--acc);border-color:#17384a;background:#0e2430}
+.tag-mut{color:var(--mut);border-color:var(--line);background:transparent}
+/* Узкий экран: оболочка сайта делает ВСЕ таблицы `display:block; overflow-x:auto`. Для окна с
+   липкой шапкой это ломает главное: таблица сама становится контейнером прокрутки, и шапка
+   уезжает вместе со строками (проверено на 390/700 px — «шапка не прилипает»). Возвращаем
+   табличную раскладку только этому окну; горизонтальную прокрутку берёт на себя обёртка. */
+@media(max-width:700px){
+  .table-wrap-recon table.tr{display:table;width:100%;overflow:visible;white-space:normal}
+  .table-wrap-recon table.tr th,.table-wrap-recon table.tr td{white-space:normal}
+}
+"""
+
 EXTRA_CSS = """/* «Соревнование»: шкала, карточки участников, решение ИИ — в палитре сайта */
 :root{--soft:#c7d2e2}
 .hint{color:var(--mut);font-size:13.5px;white-space:normal;display:block;margin-top:4px}
@@ -705,16 +743,56 @@ def _live_vs_sim_block() -> str:
     d = _live_vs_sim()
     if not d["rows"] or not d["n_live"]:
         return ""
+    # ── Воронка расхождений: считаем при сборке, ничего не пишем руками ──────────────
+    # При 100 сделках 90 % строк — «исполнено» с расхождением в 2–3 б.п. Читателю нужны
+    # аномалии и цена тормозов, а не портянка. Поэтому сверху агрегат, ниже — окно таблицы.
+    rows = list(reversed(d["rows"]))                      # свежие сверху
+    pairs = [r for r in rows if r["live"] is not None and r["sim"] is not None]
+    miss = [r for r in rows if r["live"] is None and r["sim"] is not None]
+    live_only = [r for r in rows if r.get("live_only")]
+    slip = (sum(r["live"] - r["sim"] for r in pairs) / len(pairs)) if pairs else None
+    _short = {"входы заперты серией убытков": "замок", "одна позиция за раз": "лимит 1 позы",
+              "контур ещё не работал": "до запуска"}
+    miss_by = {}
+    for r in miss:
+        k = _short.get(r["why"], r["why"])
+        miss_by[k] = miss_by.get(k, 0) + 1
+    miss_txt = " · ".join(f"{k}: {v}" for k, v in sorted(miss_by.items(), key=lambda x: -x[1]))
     body = []
-    for r in d["rows"]:
+    for r in rows:
         when = time.strftime("%d.%m %H:%M", time.gmtime(r["bar"] / 1000))
         side = "LONG" if r["side"] > 0 else "SHORT"
         live_txt = _pct(r["live"], 3) if r["live"] is not None else "—"
         sim_txt = _pct(r["sim"], 3) if r["sim"] is not None else "—"
         cls = "" if r["live"] is None else (' class="good"' if r["live"] > 0 else ' class="bad"')
+        if r.get("live_only"):
+            tag = ('<span class="tag tag-bad" title="Контур вошёл, а симуляция в этот бар не входила: '
+                   'была занята другой позицией">Только биржа</span>')
+        elif r["live"] is not None and r["sim"] is not None:
+            tag = ('<span class="tag tag-ok" title="Оба вошли в этот бар; разница в результате — '
+                   'скольжение и комиссии">Синхронно</span>')
+        else:
+            kind, label = {"входы заперты серией убытков": ("tag-warn", "Замок"),
+                           "одна позиция за раз": ("tag-warn", "Лимит 1 позы"),
+                           "контур ещё не работал": ("tag-mut", "До запуска")}.get(
+                               r["why"], ("tag-warn", "Пропуск"))
+            tag = f'<span class="tag {kind}" title="{_e(r["why"])}">{label}</span>'
         body.append(f"<tr><td>{when}</td><td>{_e(str(r['symbol']))}</td><td>{side}</td>"
                     f"<td{cls}>{live_txt}</td><td>{sim_txt}</td>"
-                    f"<td>{_e(str(r['exit'] or '—'))}</td><td>{_e(r['why'])}</td></tr>")
+                    f"<td>{_e(str(r['exit'] or '—'))}</td><td>{tag}</td></tr>")
+    kpis = (f'<div class="kpis">'
+            f'<div class="kpi"><div class="v">{len(rows)}</div>'
+            f'<div class="l">сигналов всего</div></div>'
+            f'<div class="kpi ok"><div class="v">{len(pairs)} / {len(rows)}</div>'
+            f'<div class="l">синхронно'
+            + (f' · расхождение с симуляцией {_num(slip, 3, plus=True)} п.п.' if slip is not None else '') +
+            f'</div></div>'
+            f'<div class="kpi warn"><div class="v">{len(miss)}</div>'
+            f'<div class="l">пропущено контуром' + (f' · {miss_txt}' if miss_txt else '') +
+            f'</div></div>'
+            f'<div class="kpi acc"><div class="v">{len(live_only)}</div>'
+            f'<div class="l">только у биржи — вне симуляции</div></div>'
+            f'</div>')
     diff = None
     if d["live_avg"] is not None and d["sim_match_avg"] is not None:
         diff = abs(d["live_avg"] - d["sim_match_avg"])
@@ -753,9 +831,14 @@ def _live_vs_sim_block() -> str:
             f'<p class="sub" style="max-width:960px;margin:0 auto 10px">Каждая сделка правила — слева, '
             f'что из неё вышло у биржи и что насчитала симуляция. Так видно, где разошлись не цены, '
             f'а сам набор сделок.</p>'
-            f'<div class="table-wrap"><table class="tr"><thead><tr><th>Бар входа (UTC)</th>'
+            + kpis +
+            f'<div class="table-wrap table-wrap-recon"><table class="tr"><thead><tr>'
+            f'<th>Бар входа (UTC)</th>'
             f'<th>Инструмент</th><th>Сторона</th><th>Живая</th><th>Симуляция</th><th>Выход</th>'
             f'<th>Почему разошлось</th></tr></thead><tbody>{"".join(body)}</tbody></table></div>'
+            f'<p class="recon-cap">Всего {len(rows)} {_plural(len(rows), "строка", "строки", "строк")}'
+            f' · свежие сверху · окно прокручивается внутри рамки, страница не растёт'
+            f' · наведите на метку — будет полная причина</p>'
             f'<p class="sub" style="max-width:960px;margin:10px auto 0">{summary}</p>'
             f'<p class="sub" style="max-width:960px;margin:8px auto 0">Время выхода у пары может '
             f'расходиться на часы, и это не ошибка часов: в симуляции выход помечен баром, в котором '
