@@ -73,6 +73,8 @@ const target = process.argv[2] || 'https://gramwright.pages.dev/lab/contest/';
         const hb = head ? head.getBoundingClientRect() : null;
         out.push({
           rows, want, scrolled,
+          // overlay-скроллбар не занимает место: gutter = 0 → читатель не видит, что есть ещё строки
+          gutter: wrap.offsetWidth - wrap.clientWidth,
           lastReachable: !!lb && lb.bottom <= wb.bottom + 3 && lb.top >= wb.top - 2,
           stickyHead: !!hb && Math.abs(hb.top - wb.top) <= 3,
         });
@@ -93,7 +95,8 @@ const target = process.argv[2] || 'https://gramwright.pages.dev/lab/contest/';
       else if (o.want !== o.rows) errs.push(`подпись говорит ${o.want}, строк ${o.rows}`);
       if (!o.lastReachable) errs.push('последняя строка не достижима прокруткой');
       if (!o.stickyHead) errs.push('шапка не прилипает');
-      line += ` · окно: строк ${o.rows}, прокрутка ${o.scrolled ? 'есть' : 'не нужна'}, `
+      if (o.scrolled && o.gutter < 8) errs.push(`полоса прокрутки не видна (gutter ${o.gutter}px)`);
+      line += ` · окно: строк ${o.rows}, прокрутка ${o.scrolled ? `есть (полоса ${o.gutter}px)` : 'не нужна'}, `
         + (errs.length ? 'ОШИБКИ: ' + errs.join('; ') : 'подпись/доступность/шапка ok');
       bad += errs.length;
     }

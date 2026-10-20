@@ -95,16 +95,18 @@ RECON_CSS = """
 .kpi{flex:1 1 200px;min-width:170px;border:1px solid var(--line);border-radius:10px;
   padding:10px 12px;background:var(--panel)}
 .kpi .v{font-size:20px;font-weight:600;line-height:1.25}
-.kpi .l{color:var(--mut);font-size:12.5px;margin-top:3px}
+.kpi .l{color:#a4b2c7;font-size:12.5px;margin-top:3px}
 .kpi.ok .v{color:var(--ok)} .kpi.warn .v{color:var(--warn)} .kpi.acc .v{color:var(--acc)}
 .table-wrap-recon{max-height:380px;overflow-y:auto;overflow-x:auto;border:1px solid var(--line);
-  border-radius:10px;scrollbar-width:thin;scrollbar-color:#3b4a67 var(--panel)}
+  box-shadow:inset 0 -16px 12px -12px rgba(0,0,0,.75);
+  border-radius:10px;scrollbar-width:thin;scrollbar-color:#5b6f95 var(--panel);scrollbar-gutter:stable}
 .table-wrap-recon table.tr{border-collapse:separate;border-spacing:0;width:100%}
 .table-wrap-recon table.tr th{position:sticky;top:0;z-index:2;background:var(--panel);
   box-shadow:inset 0 -1px 0 var(--line)}
 .table-wrap-recon::-webkit-scrollbar{width:12px;height:12px}
 .table-wrap-recon::-webkit-scrollbar-track{background:var(--panel)}
-.table-wrap-recon::-webkit-scrollbar-thumb{background:#3b4a67;border-radius:6px;border:3px solid var(--panel)}
+.table-wrap-recon::-webkit-scrollbar-thumb{background:#5b6f95;border-radius:6px;border:3px solid var(--panel)}
+.table-wrap-recon::-webkit-scrollbar-thumb:hover{background:#7189b3}
 .recon-cap{color:var(--mut);font-size:12.5px;margin:6px 0 0;max-width:960px}
 .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1.6;
   border:1px solid transparent;white-space:nowrap;cursor:help}
@@ -751,13 +753,16 @@ def _live_vs_sim_block() -> str:
     miss = [r for r in rows if r["live"] is None and r["sim"] is not None]
     live_only = [r for r in rows if r.get("live_only")]
     slip = (sum(r["live"] - r["sim"] for r in pairs) / len(pairs)) if pairs else None
-    _short = {"входы заперты серией убытков": "замок", "одна позиция за раз": "лимит 1 позы",
+    _short = {"входы заперты серией убытков": "замок", "одна позиция за раз": "лимит в 1 позицию",
               "контур ещё не работал": "до запуска"}
     miss_by = {}
     for r in miss:
         k = _short.get(r["why"], r["why"])
         miss_by[k] = miss_by.get(k, 0) + 1
-    miss_txt = " · ".join(f"{k}: {v}" for k, v in sorted(miss_by.items(), key=lambda x: -x[1]))
+    # Каждый пункт в своей неразрывной обёртке: иначе «до запуска: 1» рвётся и единица
+    # уезжает на отдельную строку, читаясь как ещё одна карточка.
+    miss_txt = " · ".join(f'<span style="white-space:nowrap">{k}: {v}</span>'
+                          for k, v in sorted(miss_by.items(), key=lambda x: -x[1]))
     body = []
     for r in rows:
         when = time.strftime("%d.%m %H:%M", time.gmtime(r["bar"] / 1000))
@@ -773,7 +778,7 @@ def _live_vs_sim_block() -> str:
                    'скольжение и комиссии">Синхронно</span>')
         else:
             kind, label = {"входы заперты серией убытков": ("tag-warn", "Замок"),
-                           "одна позиция за раз": ("tag-warn", "Лимит 1 позы"),
+                           "одна позиция за раз": ("tag-warn", "Лимит в 1 позицию"),
                            "контур ещё не работал": ("tag-mut", "До запуска")}.get(
                                r["why"], ("tag-warn", "Пропуск"))
             tag = f'<span class="tag {kind}" title="{_e(r["why"])}">{label}</span>'
@@ -836,7 +841,7 @@ def _live_vs_sim_block() -> str:
             f'<th>Бар входа (UTC)</th>'
             f'<th>Инструмент</th><th>Сторона</th><th>Живая</th><th>Симуляция</th><th>Выход</th>'
             f'<th>Почему разошлось</th></tr></thead><tbody>{"".join(body)}</tbody></table></div>'
-            f'<p class="recon-cap">Всего {len(rows)} {_plural(len(rows), "строка", "строки", "строк")}'
+            f'<p class="recon-cap">↕ Всего {len(rows)} {_plural(len(rows), "строка", "строки", "строк")}'
             f' · свежие сверху · окно прокручивается внутри рамки, страница не растёт'
             f' · наведите на метку — будет полная причина</p>'
             f'<p class="sub" style="max-width:960px;margin:10px auto 0">{summary}</p>'
