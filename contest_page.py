@@ -1442,11 +1442,15 @@ def render_body() -> str:
                        f"{_num(_inv_net, 2, plus=True)} %",
                        f"{_inv_n} {_plural(_inv_n, 'сделка', 'сделки', 'сделок')}",
                        (f"Те же входы советника, сторона перевёрнута: прибыльных "
-                        f"{_num(_inv.get('win_rate'), 1)} %, медиана "
-                        f"{_num(_inv.get('median'), 2, plus=True)} %. Против советника: "
-                        f"<b>{_num(_inv_net - adv_net, 2, plus=True)} п.п.</b> Издержки внутри: "
-                        f"{_num(_inv.get('costs_pct'), 2)} п.п. t-статистика {_num(_inv_t, 2)} — "
-                        f"{'значимость НЕ доказана, это наблюдение, а не вывод' if abs(_inv_t) < 2 else 'расхождение выходит за шум'}."),
+                       f"{_num(_inv.get('win_rate'), 1)} %, медиана "
+                       f"{_num(_inv.get('median'), 2, plus=True)} %. Против советника: "
+                       f"<b>{_num(_inv_net - adv_net, 2, plus=True)} п.п.</b> Издержки внутри: "
+                       f"{_num(_inv.get('costs_pct'), 2)} п.п. (0,14 % на круг × "
+                       f"{_inv_n}). Два разных теста: разница с советником внутри пар даёт "
+                       f"t = {_num(_inv.get('t_paired'), 2)} по {_inv.get('paired_n')} входам, "
+                       f"перевёрнутая сторона лучше в {_inv.get('paired_better')} парах — это вне "
+                       f"шума. А вот «Наоборот» сам по себе зарабатывает — не доказано: "
+                       f"t к нулю {_num(_inv_t, 2)}. Сложным процентом {_num(_inv.get('compound_pct'), 2, plus=True)} %."),
                        "#f97316")
     rule_rows = "".join([
         _row("симуляция", "«Тренд»", _pct(rule), f"{len(book)} {_plural(len(book))}",
@@ -1662,9 +1666,14 @@ def render_body() -> str:
         _row("бумага", "«LLM-советник»",
              _pct(adv_net) if adv_net is not None else f"{len(ai)} реш.",
              f"{len(adv)} {_plural(len(adv))}" if adv else "книги сделок нет",
+             # Вердикт про шум считается ПО БАНДЕ СОВЕТНИКА, а не правила: до 20.10.2026 здесь
+             # стоял inside_band от правила, и советник с −15,40 % при полосе −5,34…+3,27 %
+             # подписывался «в пределах шума», хотя был ниже полосы на десять пунктов.
              (f"к медиане монетки: <b>{_num(float(adv_net) - float(rc_med), 2, plus=True)} п.п.</b> · "
-              + ("в пределах шума" if inside_band else "вне полосы 5–95 %"))
-             if (adv_net is not None and rc and rc_med is not None) else "",
+              + ("в пределах шума" if (rc_lo is not None and rc_hi is not None
+                                      and rc_lo <= float(adv_net) <= rc_hi)
+                 else "ниже полосы 5–95 %: хуже, чем почти все броски монетки"))
+             if (adv_net is not None and rc and rc_med is not None and rc_lo is not None) else "",
              "#8a98a6"),
         _row(okx_status, "OKX · исполнение (демо)",
              okx_val,
