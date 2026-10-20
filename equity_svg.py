@@ -30,6 +30,11 @@ GRID_C = "#1c2a44"
 ADVISOR_C = "#8a98a6"   # советник: бумажная книга, серый — как на его карточке
 INV_C = "#f97316"       # «Наоборот»: те же входы, перевёрнутая сторона — цвет его карточки
 LIVE_C = "#a78bfa"      # живой счёт: фиолетовый — как на карточке и плашке состояния
+OKX_C = "#2dd4bf"       # книга OKX: бирюза, чтобы не путалась с фиолетовым живым счётом
+# Порог для линии на графике — не «красиво», а осмысленно: две-три точки дают ломаную,
+# которую легко принять за тренд. Поэтому книга попадает в график с трёх закрытых сделок,
+# а до этого живёт в таблице участников и в карточке. Правило одно для всех книг.
+MIN_LINE_TRADES = 3
 ZERO_C = "#5c7291"
 ZERO_TXT = "#9fb2cc"   # подпись нуля должна читаться, а не намекать
 INK_C = "#93a1b8"
@@ -107,8 +112,62 @@ def series() -> dict:
     advisor = _advisor_path()
     live = _live_path()
     inverse = _inverse_path()
+    okx = _okx_path()
     return {"anchor": anchor, "stamps": stamps, "rule": rule, "holding": holding, "coin": coin,
-            "advisor": advisor, "live": live, "inverse": inverse}
+            "advisor": advisor, "live": live, "inverse": inverse,
+            # okx_n и okx_pct есть всегда, okx (линия) — только когда выборки хватает
+            "okx_n": (okx or {}).get("n", 0), "okx_pct": (okx or {}).get("pct"),
+            "okx_usdt": (okx or {}).get("usdt"),
+            "okx": okx if okx and okx["n"] >= MIN_LINE_TRADES else None}
+
+
+def _okx_path():
+    """Книга OKX в процентах от нотионала — та же единица, что у остальных участников.
+
+    USDT сам по себе на графике бесполезен: он зависит от размера контракта. Размер контракта
+    взят из публичного эндпоинта OKX (BTC-USDT-SWAP 0,01 BTC, ETH-USDT-SWAP 0,1 ETH).
+    """
+    ctval = {"BTCUSDT": 0.01, "ETHUSDT": 0.1}
+    book_path = os.path.join(HERE, "..", "okx-advisor-book.jsonl")
+    state_path = os.path.join(HERE, "..", "okx-advisor-state.json")
+    if not os.path.exists(book_path):
+        return None
+    exits = []
+    try:
+        with open(book_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("kind") == "exit" and rec.get("measured"):
+                    exits.append(rec)
+    except OSError:
+        return None
+    if not exits:
+        return None
+    stamps_ms = []
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            st = json.load(fh)
+        stamps_ms = [int(c["exit_ms"]) for c in (st.get("closed") or []) if c.get("exit_ms")]
+    except (OSError, ValueError, KeyError, TypeError):
+        stamps_ms = []
+    points, acc, usdt = [], 0.0, 0.0
+    for i, rec in enumerate(exits):
+        try:
+            notional = float(rec["sz"]) * ctval[rec["symbol"]] * float(rec["entry_price"])
+            pct = float(rec["net_usdt"]) / notional * 100.0
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+        acc += pct
+        usdt += float(rec.get("net_usdt") or 0)
+        if i < len(stamps_ms):
+            points.append((stamps_ms[i], round(acc, 3)))
+    return {"points": points, "n": len(exits), "pct": round(acc, 3), "usdt": round(usdt, 4)}
 
 
 def _inverse_path():
@@ -267,6 +326,9 @@ def chart(width: int = 900, height: int = 330) -> str:
     if d.get("inverse"):
         pts.append((d["anchor"], 0.0))
         pts += list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
+    if d.get("okx"):
+        pts.append((d["anchor"], 0.0))
+        pts += list(d["okx"]["points"])
     if not pts:
         return ('<div class="eq-empty">Кривых пока нет: в форвардной книге нет закрытых сделок.</div>')
 
@@ -301,6 +363,8 @@ def chart(width: int = 900, height: int = 330) -> str:
     _parts.append("линия владения")
     if d.get("inverse"):
         _parts.append("пунктир «Наоборот» — те же входы советника с перевёрнутой стороной")
+    if d.get("okx"):
+        _parts.append(f"книга OKX, {d['okx_n']} закрытых сделок")
     _ends = [f"правило {last_txt}"]
     if d.get("live"):
         _ends.append(f"живой счёт {_pct_txt(d['live']['values'][-1])}")
@@ -308,6 +372,8 @@ def chart(width: int = 900, height: int = 330) -> str:
         _ends.append(f"советник {_pct_txt(d['advisor']['values'][-1])}")
     if d.get("inverse"):
         _ends.append(f"наоборот {_pct_txt(d['inverse']['values'][-1])}")
+    if d.get("okx"):
+        _ends.append(f"OKX {_pct_txt(d['okx']['pct'])}")
     aria = "График: " + ", ".join(_parts) + ". Последние точки: " + ", ".join(_ends)
     out = [f'<svg class="eq" viewBox="0 0 {width} {height}" role="img" '
            f'aria-label="{aria}" preserveAspectRatio="xMidYMid meet">']
@@ -411,6 +477,19 @@ def chart(width: int = 900, height: int = 330) -> str:
             out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="3.2" fill="{LIVE_C}">'
                        f'<title>{_fmt_day(int(ms))} · живой счёт {v:+.2f} %</title></circle>')
 
+    # книга OKX — та же единица (процент от нотионала), поэтому рисуется в общем масштабе
+    if d.get("okx"):
+        pairs = list(d["okx"]["points"])
+        line = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in _px_collapse(
+            [(d["anchor"], 0.0)] + pairs, sx))
+        out.append(f'<polyline points="{line}" fill="none" stroke="{OKX_C}" stroke-width="2" '
+                   f'stroke-opacity="0.9" stroke-dasharray="5 3" stroke-linejoin="round">'
+                   f'<title>книга OKX: {d["okx_n"]} закрытых сделок, итог '
+                   f'{d["okx"]["pct"]:+.2f} %</title></polyline>')
+        for ms, v in pairs:
+            out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="3" fill="{OKX_C}">'
+                       f'<title>{_fmt_day(int(ms))} · OKX {v:+.2f} %</title></circle>')
+
     # правило
     if d["rule"]:
         r = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in zip([d["anchor"]] + d["stamps"], [0.0] + d["rule"]))
@@ -452,6 +531,31 @@ def chart(width: int = 900, height: int = 330) -> str:
     return "".join(out)
 
 
+def threshold_note() -> str:
+    """Почему книга есть в таблице, но не на графике — считается из данных, а не пишется руками.
+
+    Порог MIN_LINE_TRADES общий для всех книг; текст сам меняется, когда сделок становится больше,
+    и сам исчезает, когда линия появилась.
+    """
+    d = series()
+    n = d.get("okx_n") or 0
+    if not n or d.get("okx"):
+        return ""
+    pct = d.get("okx_pct")
+    usdt = d.get("okx_usdt")
+    tail = ""
+    if pct is not None:
+        tail = f" (итог {_pct_txt(pct)}"
+        if usdt is not None:
+            tail += ", " + f"{usdt:+.2f}".replace(".", ",").replace("-", "\u2212") + " USDT"
+        tail += ")"
+    return (f"OKX пока не на графике: у него {n} закрытых "
+            f"{'сделка' if n == 1 else ('сделки' if n < 5 else 'сделок')} при пороге "
+            f"{MIN_LINE_TRADES} — две точки читаются как тренд, которого нет{tail}. "
+            f"Книга живёт в таблице участников, а линия появится сама, когда сделок станет "
+            f"{MIN_LINE_TRADES}. ")
+
+
 def legend() -> str:
     d = series()
     advisor = (f'<span><i style="background:{ADVISOR_C}"></i>советник, бумажная книга</span>'
@@ -466,6 +570,8 @@ def legend() -> str:
             f'<span><i style="background:{COIN_C};opacity:.75"></i>монетка: 5–95 % из 200 путей</span>'
             f'<span><i style="background:{HOLD_C}"></i>владение: купить и держать</span>'
             + inverse +
+            (f'<span><i style="background:{OKX_C}"></i>OKX · исполнение (демо), '
+             f'{d["okx_n"]} сделок</span>' if d.get("okx") else "") +
             '</div>')
 
 

@@ -1475,8 +1475,18 @@ def render_body() -> str:
                     f"{_num(abs(dist), 2)} %; ")
 
         _short = str(okx_live.get("side", "")).upper() == "SHORT"
-        okx_val = (f"{_num(okx_pct_sum, 2, plus=True)} %" if okx_exits else
-                   f"стоп {_money(okx_live.get('sl'), 2)}")
+        # Раньше при открытой позиции в колонке значения оставался только стоп, и итог закрытых
+        # сделок исчезал с глаз до самого закрытия. Теперь в значении — деньги и статус,
+        # в подписи — размер выборки и уровень защиты. Проценты остаются в пояснении.
+        _open_part = f" · в позиции {str(okx_live.get('symbol') or '').replace('USDT', '')}"
+        if okx_exits:
+            okx_val = f"{_num(okx_net, 2, plus=True)} USDT{_open_part}"
+        else:
+            okx_val = f"стоп {_money(okx_live.get('sl'), 2)}{_open_part}"
+        okx_sub = (f"{_plural(len(okx_exits), 'итог 1 сделки', 'итог 2 сделок', 'итог %d сделок' % len(okx_exits))}"
+                   if okx_exits else "закрытых сделок нет")
+        if okx_live.get("sl"):
+            okx_sub += f" · стоп {_money(okx_live.get('sl'), 2)}"
         okx_note = (f"Открыта {okx_live.get('symbol')} {str(okx_live.get('side','')).lower()} "
                     f"{_num(okx_live.get('sz'), 2)} контр. по "
                     f"{_money(okx_live.get('px'), 2)}. Защита: "
@@ -1491,10 +1501,12 @@ def render_body() -> str:
     elif okx_exits:
         okx_status = "закрыто"
         okx_val = f"{_num(okx_net, 2, plus=True)} USDT"
+        okx_sub = f"{_plural(len(okx_exits), '1 сделка', '2 сделки', '%d сделок' % len(okx_exits))} · позиций 0"
         okx_note = ""
     else:
         okx_status = "нет сделок"
         okx_val = "0 сделок"
+        okx_sub = "сделок нет"
         okx_note = ""
     # Отметка времени: страница пересобирается раз в 15 минут, и без неё «в позиции» через минуту
     # после закрытия читается как «не обновляется», а не как «снимок на 10:25».
@@ -1565,8 +1577,10 @@ def render_body() -> str:
              "#8a98a6"),
         _row(okx_status, "OKX · исполнение (демо)",
              okx_val,
-             (f"позиция 1 · сделок {len(okx_exits)}" if okx_live else
-              (f"заявка 1 · сделок {len(okx_exits)}" if okx_pend else f"сделок {len(okx_exits)}")),
+             (okx_sub if okx_live else
+              (f"заявка 1 · сделок {len(okx_exits)}" if okx_pend else
+               (f"{_plural(len(okx_exits), '1 сделка', '2 сделки', '%d сделок' % len(okx_exits))}"
+                if okx_exits else "сделок нет"))),
              okx_note,
              "#a78bfa"),
     ])
@@ -1857,9 +1871,10 @@ def render_body() -> str:
                      "правило отрывалось, а когда шло вместе с рынком. "
                      "Пунктир «Наоборот» — те же входы советника с перевёрнутой стороной, "
                      "расчёт по публичным свечам: биржа этих сделок не исполняла. "
-                     "В графике нет OKX (две закрытые сделки — это две точки, линию по ним не "
-                     "построить; книга OKX есть в таблице участников) и MT5 · TradFi "
-                     "(другой рынок и одна сделка) — у них своё место в таблице участников. "
+                     + equity_svg.threshold_note()
+                     + "MT5 · TradFi не на графике по другой причине: другой рынок, счёт в USDT и "
+                       "две сделки правила — сравнивать его кривую с процентами на крипте нельзя, "
+                       "он в таблице участников. "
                      + equity_svg.stale_note(_opens_labels))
             + uw_block
             + f"""
