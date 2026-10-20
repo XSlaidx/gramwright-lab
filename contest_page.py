@@ -607,6 +607,22 @@ def _lock_cost_txt() -> str:
             else f"сэкономило {_num(abs(val), 2)} п.п.: пропущенные сделки в сумме дали минус")
 
 
+def _lock_cost_detail() -> str:
+    """Цена замка словами, посчитанная при сборке.
+
+    Раньше здесь стояло «пропустил две сделки на −0,17 п.п.» — вписано руками и не менялось
+    никогда: после каждой новой сделки фраза расходилась с числами рядом.
+    """
+    v = _live_vs_sim()
+    rows = [r for r in v.get("rows", []) if r.get("why") == "входы заперты серией убытков"]
+    if not rows:
+        return "пропущенных из-за замка сделок в окне нет."
+    total = sum(float(r["sim"]) for r in rows if r.get("sim") is not None)
+    n = len(rows)
+    head = f"замок пропустил {n} {_plural(n, 'сделку', 'сделки', 'сделок')} на {_num(total, 2, plus=True)} п.п."
+    return head + (", то есть сэкономил." if total < 0 else ", то есть остановка стоила денег.")
+
+
 def _live_vs_sim() -> dict:
     """Построчное сопоставление живой книги с симуляцией.
 
@@ -685,6 +701,13 @@ def _live_vs_sim() -> dict:
     # Пары — только там, где есть обе колонки: иначе среднее по симуляции считалось бы по None.
     matched = [r for r in rows if r["live"] is not None and r["sim"] is not None]
     live_avg = (sum(float(l["net_pct"]) for l in live) / len(live)) if live else None
+    # Среднее по ЖИВЫМ, но только по тем сделкам, у которых есть пара в симуляции.
+    # Раньше «проскальзывание» считалось как разница между средним по ВСЕМ живым и средним
+    # по парам — разные наборы (10 против 9), и разница приписывалась издержкам.
+    live_paired_avg = (sum(r["live"] for r in rows
+                           if r.get("live") is not None and r.get("sim") is not None)
+                       / len([r for r in rows if r.get("live") is not None and r.get("sim") is not None])
+                       ) if [r for r in rows if r.get("live") is not None and r.get("sim") is not None] else None
     # Среднее по симуляции на ТЕХ ЖЕ сделках считалось из живой колонки — отсюда «расхождение
     # 0,000 п.п.»: одна и та же величина сравнивалась сама с собой (аудит 18.10.2026).
     sim_match_avg = (sum(r["sim"] for r in matched) / len(matched)) if matched else None
@@ -692,7 +715,8 @@ def _live_vs_sim() -> dict:
     skipped_lock = sum(r["sim"] for r in rows
                        if r["live"] is None and r["sim"] is not None and "заперты" in r["why"])
     skipped_other = skipped - skipped_lock
-    return {"rows": rows, "live_avg": live_avg, "sim_match_avg": sim_match_avg,
+    return {"rows": rows, "live_avg": live_avg, "live_paired_avg": live_paired_avg,
+            "sim_match_avg": sim_match_avg,
             "sim_avg": (sum(r["sim"] for r in rows if r["sim"] is not None)
                         / max(1, len([r for r in rows if r["sim"] is not None]))) if rows else None,
             "skipped": skipped, "skipped_lock": skipped_lock, "skipped_other": skipped_other,
@@ -799,12 +823,18 @@ def _live_vs_sim_block() -> str:
             f'<div class="l">только у биржи — вне симуляции</div></div>'
             f'</div>')
     diff = None
-    if d["live_avg"] is not None and d["sim_match_avg"] is not None:
-        diff = abs(d["live_avg"] - d["sim_match_avg"])
-    summary = (f"Средний результат: живые <b>{_pct(d['live_avg'], 3)}</b> на сделку, "
-               f"те же сделки в симуляции — <b>{_pct(d['sim_match_avg'], 3)}</b>"
-               + (f", расхождение {_num(diff, 3)} п.п. — это и есть проскальзывание и комиссии."
-                  if diff is not None else "."))
+    # Сравниваем ТОЛЬКО сопоставимые сделки: у пары один вход, значит и средние считаются
+    # по одному и тому же набору. Знак разницы сохраняем: + значит живая исполнена лучше.
+    _lp, _sm = d.get("live_paired_avg"), d.get("sim_match_avg")
+    diff = (_lp - _sm) if (_lp is not None and _sm is not None) else None
+    _n_p = len([r for r in d["rows"] if r.get("live") is not None and r.get("sim") is not None])
+    summary = (f"Средний результат по сопоставимым сделкам ({_n_p} с парой): живые "
+               f"<b>{_pct(_lp, 3)}</b>, те же сделки в симуляции — <b>{_pct(_sm, 3)}</b>"
+               + (f", разница {_num(diff, 3, plus=True)} п.п. — это исполнение и комиссии "
+                  f"(плюс — живая лучше)." if diff is not None else ".")
+               + (f" Средний по всем живым сделкам, включая те, у которых пары нет: "
+                  f"{_pct(d['live_avg'], 3)}." if d.get("live_avg") is not None
+                  and abs(float(d["live_avg"]) - float(_lp)) > 0.0005 else ""))
     # Точная формулировка: не «биржа не исполнила» (ордера никто не отправлял), а «контур не входил».
     # Знак важен: пропущенная ПРИБЫЛЬ — потеря, пропущенный убыток — экономия. Считать их одной суммой
     # и писать «тормоза сберегли» — именно та ошибка, которую поймал внешний разбор.
@@ -827,7 +857,13 @@ def _live_vs_sim_block() -> str:
                 f"Остальные строки — сигналы, до биржи не дошедшие"
                 + (f": {why_txt}" if why_txt else "") + ". "
                 f"Пропущенные сделки вместе дали бы {_pct(d['skipped'], 3)}: замок снял "
-                f"{_pct(d['skipped_lock'], 3)} — сам по себе он сэкономил, — а запуск контура и запрет "
+                # Знак — из данных. Раньше здесь всегда стояло «сам по себе он сэкономил»:
+                # при положительной сумме пропущенных сделок фраза врала в ту же секунду,
+                # в которую печатала число.
+                f"{_pct(d['skipped_lock'], 3)} — "
+                + ("сам по себе он сэкономил, — " if d['skipped_lock'] < 0 else
+                   "то есть остановка стоила денег, — ") +
+                f"а запуск контура и запрет "
                 f"второй позиции стоили {_pct(d['skipped_other'], 3)}. При "
                 f"{d['n_live']} {_plural(d['n_live'], 'исполненной сделке', 'исполненных сделках', 'исполненных сделках')} "
                 f"всё это в пределах шума: разницу между живой и симулированной книгой объяснить нельзя, "
@@ -897,9 +933,15 @@ def _lines(name: str) -> list[dict]:
     return out
 
 
-def _holding(symbol: str, start_ms: int, end_ms: int) -> float | None:
-    url = (f"{API}/v5/market/kline?category=linear&symbol={symbol}&interval=60"
-           f"&start={start_ms}&end={end_ms}&limit=1000")
+def _minute_close(symbol: str, around_ms: int, back: bool) -> float | None:
+    """Цена закрытия минутного бара рядом с моментом around_ms.
+
+    back=True  — бар, в который попало это время (берём предыдущую минуту, чтобы бар был закрыт);
+    back=False — самый свежий закрытый бар до этого времени.
+    """
+    start = max(0, around_ms - 120_000)
+    url = (f"{API}/v5/market/kline?category=linear&symbol={symbol}&interval=1"
+           f"&start={start}&limit=3")
     try:
         with urllib.request.urlopen(url, timeout=25) as r:
             rows = json.loads(r.read().decode("utf-8"))["result"]["list"]
@@ -907,7 +949,26 @@ def _holding(symbol: str, start_ms: int, end_ms: int) -> float | None:
         return None
     if not rows:
         return None
-    return round((float(rows[0][4]) / float(rows[-1][1]) - 1) * 100, 2)
+    rows.sort(key=lambda x: int(x[0]))
+    if back:
+        pick = [x for x in rows if int(x[0]) <= around_ms]
+        return float(pick[-1][4]) if pick else float(rows[0][4])
+    return float(rows[-1][4])
+
+
+def _holding(symbol: str, start_ms: int, end_ms: int) -> float | None:
+    """«Купил и держишь»: от цены на старте окна до цены сейчас.
+
+    20.10.2026: раньше брались ЧАСОВЫЕ свечи с `start=anchor_ms`, а Bybit отдаёт бары с
+    openTime >= start — первым приходил бар, начавшийся уже ПОСЛЕ старта окна (до часа разницы),
+    и владение считалось от чужой цены: независимый пересчёт давал −1,17 % против −0,88 % на
+    странице. Теперь обе точки — минутные закрытые бары у самого старта и у текущего момента.
+    """
+    p0 = _minute_close(symbol, start_ms, back=True)
+    p1 = _minute_close(symbol, end_ms, back=False)
+    if not p0 or not p1:
+        return None
+    return round((p1 / p0 - 1) * 100, 2)
 
 
 def _plural(n: int, one: str = "сделка", few: str = "сделки", many: str = "сделок") -> str:
@@ -1422,9 +1483,18 @@ def render_body() -> str:
     inside_band = (rc and rc_lo is not None and rc_hi is not None and rc_lo <= rule <= rc_hi)
     coin_diff = ""
     if rc and rc_med is not None:
-        d = rule - float(rc_med)
-        coin_diff = (f"к медиане монетки: <b>{_num(d, 2, plus=True)} п.п.</b> · "
-                     + ("в пределах шума" if inside_band else "вне полосы 5–95 %"))
+        # Сравнение имеет смысл только когда монетка брошена по ТЕМ ЖЕ входам, что и правило.
+        # 20.10.2026 выяснилось: файл контроля не обновлялся с 18.10, монетка стояла на 9 входах,
+        # а правило уже на 14 — и разница «+0,16 п.п.» сравнивала две разные выборки.
+        _rc_n = int(rc.get("trades") or 0)
+        if _rc_n and _rc_n == len(book):
+            d = rule - float(rc_med)
+            coin_diff = (f"к медиане монетки: <b>{_num(d, 2, plus=True)} п.п.</b> · "
+                         + ("в пределах шума" if inside_band else "вне полосы 5–95 %")
+                         + f" · броски по тем же {_rc_n} входам")
+        else:
+            coin_diff = (f"сравнение не делаем: монетка брошена по {_rc_n or '—'} входам, "
+                         f"правило — по {len(book)}; выборки разные")
     live_gap = ""
     if live_pct is not None:
         d = float(live_pct) - rule
@@ -1471,7 +1541,8 @@ def render_body() -> str:
              (f"полоса 5–95 %: {_pct(rc_lo)} … {_pct(rc_hi)} · лучше правила в "
               f"{float(rc_beaten):.0f} % бросков" if rc and rc_beaten is not None else ""),
              "#f59e0b"),
-        _row("контроль", "«Владение»", _pct(hold), "без сделок: купил и держишь",
+        _row("контроль", "«Владение»", _pct(hold),
+             "без сделок: купил на старте окна и держишь",
              "разница не считается: владение без комиссий и без решений", "#f472b6",
              note=f"BTC {_pct(btc)} · ETH {_pct(eth)}"),
         inv_row,
@@ -1666,14 +1737,12 @@ def render_body() -> str:
         _row("бумага", "«LLM-советник»",
              _pct(adv_net) if adv_net is not None else f"{len(ai)} реш.",
              f"{len(adv)} {_plural(len(adv))}" if adv else "книги сделок нет",
-             # Вердикт про шум считается ПО БАНДЕ СОВЕТНИКА, а не правила: до 20.10.2026 здесь
-             # стоял inside_band от правила, и советник с −15,40 % при полосе −5,34…+3,27 %
-             # подписывался «в пределах шума», хотя был ниже полосы на десять пунктов.
-             (f"к медиане монетки: <b>{_num(float(adv_net) - float(rc_med), 2, plus=True)} п.п.</b> · "
-              + ("в пределах шума" if (rc_lo is not None and rc_hi is not None
-                                      and rc_lo <= float(adv_net) <= rc_hi)
-                 else "ниже полосы 5–95 %: хуже, чем почти все броски монетки"))
-             if (adv_net is not None and rc and rc_med is not None and rc_lo is not None) else "",
+             # С советником нельзя сравнивать монетку правила: броски строятся по ВХОДАМ ПРАВИЛА,
+             # а у советника свои входы и своё число сделок. Раньше здесь стояла разница с медианой
+             # монетки правила (−14,09 п.п.) — число, которое ничего не измеряло.
+             ("контроль для этой книги не считается: броски монетки строятся по входам правила, "
+              "а у советника свои входы и своя выборка — сравнивать не с чем")
+             if adv_net is not None else "",
              "#8a98a6"),
         _row(okx_status, "OKX · исполнение (демо)",
              okx_val,
@@ -1899,8 +1968,9 @@ def render_body() -> str:
                      "снимается отдельным решением с указанием цены. Если не выполнено хотя бы одно — "
                      "входы остаются запертыми: замок не снимается сам, только решением владельца, "
                      "в котором записаны дата и цена остановки. Для снятия 18.10 пункт 3 действовал в прежней редакции "
-                     "(«ни одного сигнала»): по факту замок пропустил две сделки на −0,17 п.п., то есть "
-                     "сэкономил. Это решение с датой и причиной, а не доказательство: на трёх живых "
+                     "(«ни одного сигнала»). Что было на самом деле: "
+                     + _lock_cost_detail() +
+                     " Это решение с датой и причиной, а не доказательство: на трёх живых "
                      "сделках доказать нечего.")
     unlock_info = None if lock_info else (_state_now.get("unlock_note") or None)
     lock_note = ""
