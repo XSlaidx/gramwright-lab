@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import html
 import json
 import os
@@ -538,13 +539,33 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
         parts.append(f"инструментов {len(symbols)} (живых {len(live)}; закрыт {', '.join(shut)})")
     elif live:
         parts.append(f"инструментов {len(symbols)} (живых {len(live)})")
+    # Живой рынок ≠ доступный инструмент: на MetaQuotes-Demo индексы CFD открыты, но запрещены
+    # сервером (trade_mode=0). Сигнал по ним может появиться — и уйти в никуда. Показываем оба
+    # факта, чтобы «контур активен» не скрывало потерянный вход.
+    # Записи до 20.10.2026 поля `tradable` не несли — тогда берём отметку из состояния контура:
+    # пусть подпись опирается на факт, а не молчит до следующего прогона.
+    _blocked = ([s for s, v in symbols.items() if v.get("tradable") is False]
+                or list((_json("mt5-demo-state.json", {}) or {}).get("untradeable") or {}))
+    if _blocked:
+        parts.append(f"недоступны у брокера: {', '.join(_blocked)}")
+    _skipped = [r for r in rows if r.get("kind") == "mt5_signal_skipped"]
+    if _skipped:
+        parts.append(f"пропущено сигналов из-за недоступности: {len(_skipped)}")
     else:
         parts.append(f"инструментов {len(symbols)} · рынок закрыт")
     # последний бар лежит внутри каждого инструмента, а не в корне записи
     bar = last.get("last_bar") or next((v.get("last_bar") for v in symbols.values()
                                         if v.get("last_bar")), None)
     if bar:
-        parts.append(f"последний бар {bar} UTC")
+        # MT5 отдаёт время бара в СЕРВЕРНОЙ шкале (MetaQuotes-Demo = UTC+3), а подпись называла это
+        # «UTC»: 20.10.2026 на странице стояло «последний бар 19:00 UTC», хотя реальный UTC был 16:00.
+        # Сдвиг берём из той же записи журнала, где он измерен, а не из догадки.
+        _off = int(last.get("server_offset_s") or 0)
+        try:
+            _b = dt.datetime.strptime(bar, "%Y-%m-%d %H:%M") - dt.timedelta(seconds=_off)
+            parts.append(f"последний бар {_b.strftime('%Y-%m-%d %H:%M')} UTC (сервер {bar})")
+        except ValueError:
+            parts.append(f"последний бар {bar} (серверное время)")
     parts.append("сделки разрешены флагом (ордера ставит отдельный цикл)" if trading
                  else "сделки выключены: нет файла-флага")
     return " · ".join(parts)
@@ -605,6 +626,21 @@ def _lock_cost_txt() -> str:
     # минус», то есть одно и то же событие называлось и потерей, и экономией (аудит 18.10.2026).
     return (f"стоило {_num(abs(val), 2)} п.п. упущенного хода" if val > 0
             else f"сэкономило {_num(abs(val), 2)} п.п.: пропущенные сделки в сумме дали минус")
+
+
+def _mt5_rule_count_txt() -> str:
+    """Сколько сделок у правила MT5 — словами, посчитанными при сборке.
+
+    Раньше тут стояло «две сделки правила» вписанным текстом: после третьей и четвёртой сделки
+    подпись под графиком расходилась с таблицей участников на этой же странице.
+    """
+    st = _json("mt5-demo-state.json", {}) or {}
+    closed = [c for c in (st.get("closed") or [])
+              if "тестовая" not in str(c.get("note") or "")]
+    n = len(closed)
+    if not n:
+        return "правило там ещё не открывало сделок"
+    return (f"{n} {_plural(n, 'сделка', 'сделки', 'сделок')} правила")
 
 
 def _lock_cost_detail() -> str:
@@ -2046,7 +2082,8 @@ def render_body() -> str:
                      "расчёт по публичным свечам: биржа этих сделок не исполняла. "
                      + equity_svg.threshold_note()
                      + "MT5 · TradFi не на графике по другой причине: другой рынок, счёт в USDT и "
-                       "две сделки правила — сравнивать его кривую с процентами на крипте нельзя, "
+                       + _mt5_rule_count_txt()
+                       + " — сравнивать его кривую с процентами на крипте нельзя, "
                        "он в таблице участников. "
                      + equity_svg.stale_note(_opens_labels))
             + uw_block
