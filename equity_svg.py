@@ -480,7 +480,9 @@ def chart(width: int = 900, height: int = 330) -> str:
     # книга OKX — та же единица (процент от нотионала), поэтому рисуется в общем масштабе
     if d.get("okx"):
         pairs = list(d["okx"]["points"])
-        line = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in _px_collapse(
+        # _px_collapse отдаёт уже пиксельные X — второе применение sx() уводило линию
+        # в отрицательные координаты (вертикальный «забор» из шести точек на одном X).
+        line = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in _px_collapse(
             [(d["anchor"], 0.0)] + pairs, sx))
         out.append(f'<polyline points="{line}" fill="none" stroke="{OKX_C}" stroke-width="2" '
                    f'stroke-opacity="0.9" stroke-dasharray="5 3" stroke-linejoin="round">'

@@ -87,7 +87,10 @@ TAB_NAV = """
 EXTRA_CSS = """/* «Соревнование»: шкала, карточки участников, решение ИИ — в палитре сайта */
 :root{--soft:#c7d2e2}
 .hint{color:var(--mut);font-size:13.5px;white-space:normal;display:block;margin-top:4px}
-.table-wrap{overflow-x:auto;max-height:420px;overflow-y:auto;margin:12px 0 22px;
+/* Высоту НЕ ограничиваем: max-height:420px обрезал таблицу на середине, полоса прокрутки
+   поверх контента не видна, и блок читался как пустой — при этом самые свежие сделки
+   (они внизу) оставались ровно за срезом. Горизонтальная прокрутка на узком экране остаётся. */
+.table-wrap{overflow-x:auto;margin:12px 0 22px;
              border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch}
 table.tr{width:100%;border-collapse:collapse;margin:0;font-size:14.5px;min-width:620px}
 table.tr th{color:var(--mut);font-weight:600;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
