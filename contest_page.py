@@ -1949,6 +1949,33 @@ def render_body() -> str:
 
     fee_rows = _fee_block()
 
+    def _coin_calib_note() -> str:
+        """Честная оговорка про монетку: 50/50 — это контроль направления, и вот что даёт
+        калибровка по базовой частоте рынка. Числа берутся из файла замера, а не пишутся руками."""
+        try:
+            d = json.load(open(os.path.join(DEMO, "coin-drift-measure.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        rows_ = d.get("rows") or []
+        if not rows_:
+            return ""
+        up = [r["up_share"] for r in rows_ if r.get("up_share")]
+        shift = [r["coin_drift_global"]["p50"] - r["coin_50"]["p50"] for r in rows_]
+        model_rows_ = [r for r in rows_ if "советник" not in r["name"]]
+        verdicts = sum(1 for r in model_rows_ if r["actual_pct"] > r["coin_drift_global"]["p95"])
+        return (f'<p>Монетка бросается 50/50 — это контроль <b>направления</b> при тех же входах и '
+                f'выходах. Отдельно проверена калибровка по базовой частоте рынка: доля растущих '
+                f'часовых баров в окнах '
+                + (f'{_num(min(up) * 100, 1)}–{_num(max(up) * 100, 1)} %'
+                   if up and (max(up) - min(up)) >= 0.001 else
+                   f'{_num(max(up) * 100, 1) if up else "—"} %')
+                + f', поэтому сдвиг медианы при калибровке '
+                f'составляет {_num(min(shift), 2, plus=True)}…{_num(max(shift), 2, plus=True)} п.п. '
+                f'Вердикт не меняется: моделей выше 95 % калиброванной полосы — {verdicts} из '
+                f'{len(model_rows_)}. Замер: <code>coin-drift-measure.json</code>. '
+                f'Про дрейф сильнее говорит колонка «Владение»: купить и держать — это и есть '
+                f'проверка «не заработал ли ты просто на росте».</p>')
+
     def _model_d_row() -> str:
         """D — не торговля, а объявленная гипотеза в бумаге: показываем её состояние честно."""
         jr = _lines("model-d-journal.jsonl")
@@ -2323,7 +2350,8 @@ def render_body() -> str:
 <details class="how"><summary>Как считается</summary>
 <p>«Случайный» — те же входы и выходы, но сторона выбирается 200 раз броском монетки с фиксированным
 зерном; медиана и полоса 5–95 % показывают, что даёт везение. «Владение» — купить в начале окна и
-держать, ничего не решая, без комиссий входа и выхода.</p></details>
+держать, ничего не решая, без комиссий входа и выхода.</p>
+{_coin_calib_note()}</details>
 <h3>ИИ</h3>
 {ai_rows}
 {model_rows}
