@@ -1921,8 +1921,12 @@ def render_body() -> str:
             for label, per in (lo.get("results") or {}).items():
                 if not cmp_:
                     break
+                # Сумма процентов и сложный процент расходятся сильно (B · ETH: +85,4 % против
+                # +14,6 %) — показываем оба, иначе число на странице выглядит лучше, чем есть.
                 now_lo = " · ".join(f"{_e(sym).replace('USDT', '')} "
-                                    f"{_num(m['net_sum_pct'], 1, plus=True)} %" for sym, m in per.items())
+                                    f"{_num(m['net_sum_pct'], 1, plus=True)} % "
+                                    f"(сложным {_num(m.get('eq_compound_pct'), 1, plus=True)} %)"
+                                    for sym, m in per.items())
                 mixed = " · ".join(f"{_e(k.split(' · ')[-1]).replace('USDT', '')} "
                                    f"{_num(v['mixed_net_pct'], 1, plus=True)} %"
                                    for k, v in cmp_.items() if k.startswith(label))
