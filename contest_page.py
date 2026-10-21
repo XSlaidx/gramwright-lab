@@ -531,6 +531,22 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
             parts.append(f"{_s}: клиринг {_c['from']}–{_c['to']} (сервер), гэп на открытии "
                          f"{_num(_c.get('gap_avg_pct'), 2)} % в среднем "
                          f"(худший {_num(_c.get('gap_max_pct'), 2)} %)")
+    # ОТКРЫТАЯ ПОЗИЦИЯ. Раньше карточка показывала только ЗАКРЫТЫЕ сделки, поэтому вход,
+    # который уже стоит на счёте, на странице не появлялся вовсе — и выглядело так, будто
+    # контур его не сделал. Пишем её отдельным фактом: инструмент, сторона, лот, цена, сколько
+    # минут в рынке и стоит ли защита (стоп/тейк). Данные — из state.open, а не из догадки.
+    _op = (mt5 or {}).get("open") or {}
+    if _op.get("symbol"):
+        _side = "покупка" if int(_op.get("side") or 0) > 0 else "продажа"
+        _mins = None
+        try:
+            _mins = int((time.time() * 1000 - float(_op.get("entry_ms") or 0)) / 60000)
+        except (TypeError, ValueError):
+            _mins = None
+        _when = f", {_mins} мин в рынке" if (_mins is not None and _mins >= 0) else ""
+        _prot = "защита (стоп/тейк) стоит" if _op.get("protection") else "БЕЗ ЗАЩИТЫ — это ошибка"
+        parts.append(f"открыта: {_op['symbol']} {_side} {_num(_op.get('lots'), 2)} лота "
+                     f"@ {_num(_op.get('entry_price'), 5)}{_when} · {_prot}")
     _skipped = [r for r in rows if r.get("kind") == "mt5_signal_skipped"]
     if _skipped:
         parts.append(f"пропущено ранее из-за недоступности: {len(_skipped)}")
