@@ -2077,31 +2077,36 @@ def render_body() -> str:
                               "Блоки 12 и 24 бара: " + "; ".join(notes) + ".",
                               "#8a98a6"))
 
-        # Портфельная гипотеза B-3 — отдельной строкой: у неё другая конструкция (равные веса
-        # и общий порядок блоков), поэтому в таблицу по символам она не встраивается.
-        try:
-            p3 = json.load(open(os.path.join(DEMO, "block-bootstrap-b3.json"), encoding="utf-8"))
+        # Портфельные гипотезы (B-3 крипта, B-4 другой рынок) — отдельными строками:
+        # у них другая конструкция (равные веса, общий порядок блоков), в таблицу по символам
+        # они не встраиваются.
+        for pf, label_pf in (("block-bootstrap-b3.json", "ПОРТФЕЛЬ BTC+ETH+SOL · A"),
+                             ("block-bootstrap-b4.json", "ПОРТФЕЛЬ XAU+EURUSD+EURJPY · A")):
+            try:
+                p3 = json.load(open(os.path.join(DEMO, pf), encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
             blocks3 = {b: s for b, s in (p3.get("blocks") or {}).items() if "p95" in s}
-            if blocks3:
-                act3 = float(p3.get("actual_portfolio_pct") or 0)
-                win3 = format(int(p3.get("window_bars") or 0), ",d").replace(",", " ")
-                heads.append(f'B-3: окно {win3} баров, {int(p3.get("replicas") or 0)} пересборок, '
-                             f'хеш <code>{str(p3.get("hypothesis_hash") or "")[:12]}</code>')
-                rows_.append(_row(
-                    "бутстрап", "ПОРТФЕЛЬ BTC+ETH+SOL · A",
-                    f"{win3}: {_num(act3, 2, plus=True)} %",
-                    "выше 95 %" if all(act3 > float(s["p95"]) for s in blocks3.values())
-                    else "внутри полосы",
-                    "Равные веса, порядок блоков общий для всех трёх рядов. Блоки 12 и 24: медиана "
-                    + " / ".join(_num(s["p50"], 1, plus=True) for s in blocks3.values())
-                    + " %, не хуже факта "
-                    + " / ".join(_num(s["share_ge_actual_pct"], 0) for s in blocks3.values())
-                    + " %. По символам: "
-                    + " · ".join(f"{k.replace('USDT', '')} {_num(v, 2, plus=True)} %"
-                                 for k, v in (p3.get("actual") or {}).items()) + ".",
-                    "#38bdf8"))
-        except (OSError, ValueError):
-            pass
+            if not blocks3:
+                continue
+            act3 = float(p3.get("actual_portfolio_pct") or 0)
+            win3 = format(int(p3.get("window_bars") or 0), ",d").replace(",", " ")
+            heads.append(f'{pf.replace("block-bootstrap-", "").replace(".json", "").upper()}: '
+                         f'окно {win3} баров, {int(p3.get("replicas") or 0)} пересборок, '
+                         f'хеш <code>{str(p3.get("hypothesis_hash") or "")[:12]}</code>')
+            rows_.append(_row(
+                "бутстрап", label_pf,
+                f"{win3}: {_num(act3, 2, plus=True)} %",
+                "выше 95 %" if all(act3 > float(s["p95"]) for s in blocks3.values())
+                else "внутри полосы",
+                "Равные веса, порядок блоков общий для всех рядов. Блоки 12 и 24: медиана "
+                + " / ".join(_num(s["p50"], 1, plus=True) for s in blocks3.values())
+                + " %, не хуже факта "
+                + " / ".join(_num(s["share_ge_actual_pct"], 0) for s in blocks3.values())
+                + " %. По символам: "
+                + " · ".join(f"{k.replace('USDT', '')} {_num(v, 2, plus=True)} %"
+                             for k, v in (p3.get("actual") or {}).items()) + ".",
+                "#38bdf8"))
         head = ('<p class="cap">Правило против <b>перемешанного рынка</b>: ряд режется на блоки по '
                 '12 и 24 бара, блоки берутся в случайном порядке с возвращением, доходности '
                 'сохраняются, а тренд и порядок — нет; на каждой такой «альтернативной реальности» '
