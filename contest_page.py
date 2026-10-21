@@ -2257,12 +2257,33 @@ def render_body() -> str:
                 "#f97316"))
 
         if live:
-            rows_.append(_row("режим", "живая книга SOL+XRP",
+            # Символы берём из объявления, а не из текста: состав расширяется, и подпись должна
+            # меняться вместе с ним, иначе страница врёт о том, что именно проверяется.
+            try:
+                _decl = json.load(open(os.path.join(DEMO, "regime-live-hypothesis-v2.json"),
+                                       encoding="utf-8"))
+                _syms = _decl["params"]["symbols"]
+                _fwd = str(_decl.get("declared_at") or "")[:10]
+            except (OSError, ValueError, KeyError):
+                _syms, _fwd = ["SOLUSDT", "XRPUSDT"], str(live.get("ts") or "")[:10]
+            _names = "+".join(x.replace("USDT", "") for x in _syms)
+            _jr = [r for r in _lines("regime-live-journal.jsonl") if r.get("symbol")]
+            _allowed = [r for r in _jr if r.get("allowed")]
+            _last = {}
+            for r in _jr:
+                if r["symbol"] in _syms:
+                    _last[r["symbol"]] = r
+            _ptxt = " · ".join(
+                f"{s.replace('USDT', '')} p {_num(_last[s].get('p_up'), 3)}"
+                for s in _syms if s in _last)
+            rows_.append(_row("режим", f"живая книга {_names}",
                               f"{int(live.get('trades') or 0)} сдел.",
-                              "бумага",
-                              (f"Форвард с {str(live.get('ts') or '')[:10]}: решения по закрытому бару, "
-                               f"выход через 12 баров, тариф 0,11 %. Доказательством считается "
-                               f"40–60 сделок и t > 2 — раньше ничего не заявляем."),
+                              f"бумага · {len(_jr)} решений",
+                              (f"Форвард с {_fwd}: решения по закрытому бару, "
+                               f"вход по закрытию следующего, выход через 12 баров, тариф 0,11 %. "
+                               f"Разрешено входов: {len(_allowed)} из {len(_jr)} решений — порог 0,60 "
+                               f"пробивается редко по построению. Последние вероятности: {_ptxt}. "
+                               f"Доказательством считается 40–60 сделок и t > 2 — раньше ничего не заявляем."),
                               "#8a98a6"))
         if not rows_:
             return ""
