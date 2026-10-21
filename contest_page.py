@@ -2010,6 +2010,58 @@ def render_body() -> str:
 
     model_d_row = _model_d_row()
 
+    def _bootstrap_block() -> str:
+        """Правило против «перемешанного рынка»: блочный бутстрап по объявленной гипотезе B-1.
+
+        Все числа считаются при сборке из block-bootstrap.json. Если файла нет — блока нет:
+        пустая рамка «данных нет» здесь хуже, чем отсутствие блока.
+        """
+        try:
+            d = json.load(open(os.path.join(DEMO, "block-bootstrap.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        res = d.get("results") or {}
+        if not res:
+            return ""
+        rows_ = []
+        for key, v in res.items():
+            actual = float(v.get("actual_pct") or 0)
+            blocks = v.get("block") or {}
+            if not blocks:
+                continue
+            above = all(actual > float(b.get("p95", 0)) for b in blocks.values())
+            tail = " · ".join(f"блок {b}: медиана {_num(s['p50'], 2, plus=True)} %, "
+                              f"не хуже факта {_num(s['share_ge_actual_pct'], 0)} %"
+                              for b, s in blocks.items())
+            sym_, mod_ = ((key.split(" · ")[0], " · ".join(key.split(" · ")[1:]))
+                          if " · " in key else ("", key))
+            rows_.append(_row("бутстрап", f"{sym_.replace('USDT', '')} · {mod_}",
+                              f"{_num(actual, 2, plus=True)} %",
+                              "выше 95 %" if above else "внутри полосы",
+                              f"{tail}. "
+                              f"Полоса блока 12: {_num(list(blocks.values())[0]['p05'], 1, plus=True)}…"
+                              f"{_num(list(blocks.values())[0]['p95'], 1, plus=True)} %.",
+                              "#8a98a6"))
+        if not rows_:
+            return ""
+        hsh = str(d.get("hypothesis_hash") or "")[:12]
+        # Числа с разрядностью готовим отдельно: .replace() поверх склеенной f-строки
+        # снимал ВСЕ запятые в предложении, а не только разделитель разрядов.
+        n_rep = int(d.get("replicas") or 0)
+        n_win = format(int(d.get("window_bars") or 0), ",d").replace(",", " ")
+        head = (f'<p class="cap">Правило против <b>перемешанного рынка</b>: ряд режется на блоки по '
+                f'12 и 24 бара, блоки берутся в случайном порядке с возвращением, доходности '
+                f'сохраняются, а тренд и порядок — нет; на каждой такой «альтернативной реальности» '
+                f'прогоняется то же правило. {n_rep} пересборок, окно {n_win} баров, '
+                f'тариф {_num(d.get("cost_pct"), 2)} % на круг'
+                + (f'. Гипотеза объявлена до чисел, хеш <code>{hsh}</code>.' if hsh else ".")
+                + ' <b>Оговорка:</b> окно — медвежьи 1,4 года, а бутстрап стирает тренд, поэтому '
+                  'для long-only правила сравнение смещено в минус: «внутри полосы» здесь значит '
+                  '«преимущество не доказано», а не «опровергнуто».</p>')
+        return head + "".join(rows_)
+
+    bootstrap_rows = _bootstrap_block()
+
     ai_rows = "".join([
         _row("бумага", "«LLM-советник»",
              _pct(adv_net) if adv_net is not None else f"{len(ai)} реш.",
@@ -2357,6 +2409,7 @@ def render_body() -> str:
 {model_rows}
 {model_d_row}
 {fee_rows}
+{bootstrap_rows}
 <details class="how"><summary>Как считается</summary>
 <p>«LLM-советник» — бумажная книга: модель задаёт только направление, выходы считает код.</p>
 <p>«A» long-only и «B» бустинг — те же 14 признаков из часовых свечей, horizon 12 баров, порог 0,60.
