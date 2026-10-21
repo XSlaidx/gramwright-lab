@@ -1647,6 +1647,24 @@ def render_body() -> str:
         _inv_net = float(_inv.get("net_pct") or 0)
         _inv_n = int(_inv.get("trades") or 0)
         _inv_t = float(_inv.get("t_stat") or 0)
+        _pt = float(_inv.get("t_paired") or 0)
+        # ВЕРДИКТЫ СЧИТАЮТСЯ ИЗ ЧИСЕЛ, а не вписаны текстом. Раньше здесь стояло
+        # «перевёрнутая сторона лучше … это вне шума» и «сам не зарабатывает» — при
+        # t_paired = −2,38 и t к нулю = −5,21 оба утверждения стали ложными: перевёрнутая
+        # сторона теперь ХУЖЕ советника и значимо убыточна. Текст, не зависящий от данных,
+        # на стенде запрещён — и это ровно тот случай, когда он соврал.
+        if _inv_t <= -2:
+            self_verdict = "значимо убыточен"
+        elif _inv_t >= 2:
+            self_verdict = "значимо прибылен"
+        else:
+            self_verdict = "от нуля не отличается"
+        if _pt <= -2:
+            pair_verdict = "значит направление советника несёт информацию"
+        elif _pt >= 2:
+            pair_verdict = "значит советник хуже своей копии наоборот"
+        else:
+            pair_verdict = "разница в пределах шума"
         inv_row = _row("контроль", "«Наоборот»",
                        f"{_num(_inv_net, 2, plus=True)} %",
                        f"{_inv_n} {_plural(_inv_n, 'сделка', 'сделки', 'сделок')}",
@@ -1656,10 +1674,10 @@ def render_body() -> str:
                        f"<b>{_num(_inv_net - adv_net, 2, plus=True)} п.п.</b> Издержки внутри: "
                        f"{_num(_inv.get('costs_pct'), 2)} п.п. (0,14 % на круг × "
                        f"{_inv_n}). Два разных теста: разница с советником внутри пар даёт "
-                       f"t = {_num(_inv.get('t_paired'), 2)} по {_inv.get('paired_n')} входам, "
-                       f"перевёрнутая сторона лучше в {_inv.get('paired_better')} парах — это вне "
-                       f"шума. А вот «Наоборот» сам по себе зарабатывает — не доказано: "
-                       f"t к нулю {_num(_inv_t, 2)}. Сложным процентом {_num(_inv.get('compound_pct'), 2, plus=True)} %."),
+                       f"t = {_num(_pt, 2)} по {_inv.get('paired_n')} входам, "
+                       f"перевёрнутая сторона лучше в {_inv.get('paired_better')} парах — "
+                       f"{pair_verdict}. Сам «Наоборот» по себе: t к нулю {_num(_inv_t, 2)} — "
+                       f"{self_verdict}. Сложным процентом {_num(_inv.get('compound_pct'), 2, plus=True)} %."),
                        "#f97316")
     rule_rows = "".join([
         _row("симуляция", "«Тренд»", _pct(rule), f"{len(book)} {_plural(len(book))}",
