@@ -682,6 +682,50 @@ def _model_window_note() -> str:
     return base + (f" Решений по новой гипотезе: {len(hyp)}." if hyp else "")
 
 
+def _adv_hyp_episodes() -> dict:
+    """Сделки новой гипотезы, свёрнутые в НЕЗАВИСИМЫЕ эпизоды.
+
+    Сделки советника почти всегда идут встык: выход сработал — на следующем баре новый вход.
+    Считать их независимыми наблюдениями нельзя: 38 «сделок» внутри одних суток — это один
+    непрерывный эпизод, и t по ним завышен. Цель доказательства — 40 эпизодов, а не 40 сделок.
+    """
+    rows_ = [r for r in _lines("advisor-book.jsonl")
+             if r.get("kind") == "trade" and r.get("exit_rule") == "be-v1"]
+    rows_.sort(key=lambda r: int(r.get("entry_ms") or 0))
+    groups, cur, run_end = [], [], -1
+    for r in rows_:
+        e0, e1 = int(r.get("entry_ms") or 0), int(r.get("exit_ms") or 0)
+        if cur and e0 <= run_end:
+            cur.append(r)
+            run_end = max(run_end, e1)
+        else:
+            if cur:
+                groups.append(cur)
+            cur, run_end = [r], e1
+    if cur:
+        groups.append(cur)
+    return {"trades": len(rows_), "episodes": len(groups)}
+
+
+def _adv_hyp_count() -> str:
+    d = _adv_hyp_episodes()
+    n, ep = d["trades"], d["episodes"]
+    if not n:
+        return "0 сделок"
+    tail = f" · {ep} {_plural(ep, 'эпизод', 'эпизода', 'эпизодов')} без наложений"
+    return f"{n} {_plural(n)}{tail}"
+
+
+def _adv_hyp_note() -> str:
+    d = _adv_hyp_episodes()
+    base = ("тейк 1 ATR + безубыток после +0,5 ATR · считается с даты объявления гипотезы")
+    if d["trades"] and d["episodes"] < 10:
+        base += (f". Сделки идут встык: {d['trades']} входов внутри {d['episodes']} "
+                 f"независимого эпизода, поэтому t по ним как по независимым завышен — "
+                 f"доказательством считается 40 эпизодов, а не 40 сделок.")
+    return base
+
+
 def _advisor_hyp_note() -> str:
     """Строка об объявленной гипотезе выхода: когда, хеш, сколько сделок и ориентир.
 
@@ -2120,6 +2164,107 @@ def render_body() -> str:
 
     bootstrap_rows = _bootstrap_block()
 
+    def _regime_block() -> str:
+        """Режимный фильтр: R-1 (сравнение), R-2 (BTC/ETH), R-3 (вне разработки), живая книга.
+
+        Все числа считаются при сборке. R-1/R-2/R-3 объявлены до чисел; порог доказательства
+        (бутстрап выше 95 % И CPCV ≥ 80 %) записан в объявлениях, а не придуман после.
+        """
+        try:
+            r1 = json.load(open(os.path.join(DEMO, "regime-filter.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        rows_ = []
+        live = {}
+        try:
+            live = json.load(open(os.path.join(DEMO, "regime-live.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            live = {}
+
+        for symbol, variants in (r1.get("results") or {}).items():
+            hand = variants.get("ручные пороги") or {}
+            reg = variants.get("режимная модель") or {}
+            bare = variants.get("без фильтра") or {}
+            if not reg:
+                continue
+            rows_.append(_row(
+                "режим", f"{symbol.replace('USDT', '')} · режимный фильтр",
+                f"{_num(reg.get('net_mean_pct'), 2, plus=True)} %/сделку",
+                f"{int(reg.get('trades') or 0)} сдел.",
+                (f"Без фильтра {_num(bare.get('net_mean_pct'), 2, plus=True)} %/сделку, с ручными "
+                 f"порогами {_num(hand.get('net_mean_pct'), 2, plus=True)} %. Режимный: t "
+                 f"{_num(reg.get('t'), 2)}, плюсовых {_num(reg.get('hit_pct'), 1)} %. "
+                 f"Сравнение на одних входах модели A, тариф 0,11 %."),
+                "#38bdf8"))
+
+        # проверки R-2 и R-3
+        for fn, label in (("regime-bootstrap.json", "R-2 · BTC/ETH"),
+                          ("regime-bootstrap-r3.json", "R-3 · SOL/XRP (вне разработки)")):
+            try:
+                d = json.load(open(os.path.join(DEMO, fn), encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            blocks = d.get("results") or {}
+            if not blocks:
+                continue
+            ok = all(v["actual_pct"] > max(s["p95"] for s in v["block"].values())
+                     and v["cpcv"]["positive_share_pct"] >= 80 for v in blocks.values())
+            parts = []
+            for sym, v in blocks.items():
+                cpcv = v["cpcv"]
+                parts.append(f"{sym.replace('USDT', '')}: факт {_num(v['actual_pct'], 1, plus=True)} %, "
+                             f"выше {_num(100 - max(s['share_ge_actual_pct'] for s in v['block'].values()), 0)} % "
+                             f"пересборок, CPCV {cpcv['positive_folds']}/{cpcv['n_folds']}")
+            rows_.append(_row("режим", label,
+                              "порог пройден" if ok else "не пройден",
+                              "2 символа" if len(blocks) == 2 else f"{len(blocks)} симв.",
+                              "; ".join(parts) + ".", "#22c55e" if ok else "#f97316"))
+
+        # D-2: проверка того же фильтра на ДРУГИХ входах (перцентиль модели D). Отрицательный
+        # результат публикуется наравне с положительным — иначе стенд перестаёт быть проверкой.
+        try:
+            d2 = json.load(open(os.path.join(DEMO, "regime-d2.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            d2 = {}
+        for symbol, variants in (d2.get("results") or {}).items():
+            reg = variants.get("режимная модель") or {}
+            hand = variants.get("ручные пороги") or {}
+            bare = variants.get("без фильтра") or {}
+            if not reg:
+                continue
+            rows_.append(_row(
+                "режим", f"{symbol.replace('USDT', '')} · D-2: фильтр на входах D",
+                f"{_num(reg.get('net_mean_pct'), 2, plus=True)} %/сделку",
+                f"{int(reg.get('trades') or 0)} сдел.",
+                (f"Правило D (перцентиль q90/q10) убыточно во всех вариантах: без фильтра "
+                 f"{_num(bare.get('net_mean_pct'), 2, plus=True)} % (t {_num(bare.get('t'), 1)}), "
+                 f"с ручными порогами {_num(hand.get('net_mean_pct'), 2, plus=True)} % "
+                 f"(t {_num(hand.get('t'), 1)}), с режимным {_num(reg.get('net_mean_pct'), 2, plus=True)} % "
+                 f"(t {_num(reg.get('t'), 1)}). Фильтр режет убыток, но не лечит вход — "
+                 f"переключение отклонено по объявленному условию."),
+                "#f97316"))
+
+        if live:
+            rows_.append(_row("режим", "живая книга SOL+XRP",
+                              f"{int(live.get('trades') or 0)} сдел.",
+                              "бумага",
+                              (f"Форвард с {str(live.get('ts') or '')[:10]}: решения по закрытому бару, "
+                               f"выход через 12 баров, тариф 0,11 %. Доказательством считается "
+                               f"40–60 сделок и t > 2 — раньше ничего не заявляем."),
+                              "#8a98a6"))
+        if not rows_:
+            return ""
+        head = ('<p class="cap">Режимный фильтр вместо придуманных порогов: состояния рынка '
+                'выделяются гауссовой смесью (K=3) по трём наблюдаемым величинам, вход разрешён '
+                'только в состоянии, которое на прошлом давало лучшую доходность. Обучение — до '
+                'бара минус 60, подглядывания нет. Проверки R-1…R-3 объявлены до чисел; '
+                'порог доказательства — бутстрап выше 95 % И не менее 80 % плюсовых разбиений CPCV. '
+                '<b>Оговорка:</b> все четыре символа — крипта; на золоте и валюте переносимость '
+                'не проверялась.</p>')
+        return head + "".join(rows_)
+
+    regime_rows = _regime_block()
+
     ai_rows = "".join([
         _row("бумага", "«LLM-советник»",
              _pct(adv_net) if adv_net is not None else f"{len(ai)} реш.",
@@ -2135,8 +2280,8 @@ def render_body() -> str:
         # Сделки по объявленной гипотезе выхода — отдельной строкой: иначе они растворятся
         # в старой книге, и «−15,40 %» будет выглядеть как текущее состояние советника.
         *([_row("бумага", "«LLM-советник» · новые выходы", _pct(adv_hyp_net),
-                f"{len(adv_hyp)} {_plural(len(adv_hyp))}",
-                "тейк 1 ATR + безубыток после +0,5 ATR · считается с даты объявления гипотезы",
+                _adv_hyp_count(),
+                _adv_hyp_note(),
                 "#8a98a6")]
           if adv_hyp_net is not None else []),
         _row(okx_status, "OKX · исполнение (демо)",
@@ -2464,39 +2609,67 @@ def render_body() -> str:
 {_coin_calib_note()}</details>
 <h3>ИИ</h3>
 {ai_rows}
-{model_rows}
-{model_d_row}
-{fee_rows}
-{bootstrap_rows}
 <details class="how"><summary>Как считается</summary>
 <p>«LLM-советник» — бумажная книга: модель задаёт только направление, выходы считает код.</p>
-<p>«A» long-only и «B» бустинг — те же 14 признаков из часовых свечей, horizon 12 баров, порог 0,60.
-Разница: A входит только в лонг, B — обе стороны нелинейной моделью и стоит контролем: он отвечает,
-помогает ли нелинейность вообще. Выходы и издержки у всех одинаковые.</p>
-<p>{_a_choice_note()}</p>
-{does}
+<p>Модельные контуры (A long-only, B бустинг, D перцентиль), исследование издержек и блочный
+бутстрап живут во вкладке «Модели и логика»: это разбор под капотом, а не итог окна. Здесь
+осталось только то, что отвечает на вопрос «кто выигрывает и какова просадка».</p>
+</details>
 </div>
 <div class="tpane" id="tabpane-1" role="tabpanel" aria-labelledby="tabbtn-1" data-tab="1" data-active="0">
 {_venue_extra}
 </div>
 <div class="tpane" id="tabpane-2" role="tabpanel" aria-labelledby="tabbtn-2" data-tab="2" data-active="0">
+{ai_block}
+
+{learned_block}
+
+<h2>Экспериментальные контуры: A long-only, B бустинг, D перцентиль</h2>
+<p class="sub">Три правила на одних и тех же 14 признаках из часовых свечей, horizon 12 баров, порог 0,60,
+издержки 0,11 % на круг. Это не участники гонки, а разбор: помогает ли нелинейность (B), стоит ли
+ограничение «только лонги» (A) и что даёт перцентиль вместо порога (D).</p>
+{model_rows}
+{model_d_row}
+<details class="how"><summary>Как считается</summary>
+<p>«A» long-only и «B» бустинг — те же 14 признаков из часовых свечей, horizon 12 баров, порог 0,60.
+Разница: A входит только в лонг, B — обе стороны нелинейной моделью и стоит контролем: он отвечает,
+помогает ли нелинейность вообще. Выходы и издержки у всех одинаковые.</p>
+<p>{_a_choice_note()}</p>
+</details>
+
 <h2>Идут, но выборки нет: TradFi у брокера</h2>
 <p class="sub" style="max-width:960px;margin:0 auto 10px">Здесь есть исполненные сделки, поэтому это не
 «контур без результата». Но на двух сделках вывод о правиле не делается: строка говорит только то,
 что исполнение идёт и исходы считаются по счёту.</p>
 {mt5_rows_html}
+
 <h2>Ещё в работе: контуры без результата</h2>
 <p class="sub">Сделок нет — сравнивать нечего. Держим их на виду, потому что это часть стенда,
 а не реклама: у каждого своё правило, и каждый считается честно.</p>
 {wip_rows}
-{_cal_details}
-"""
-            + f"""
-{ai_block}
 
-{learned_block}
+<h2>Исследование издержек и шортов</h2>
+<p class="sub">Сколько из результата съедает тариф и что было бы при мейкерской комиссии. Учёт переведён
+на реальный тейкер 0,11 % на круг; правило входа при этом не менялось — фильтр модели C остаётся
+объявленным 0,04 % из протокола v5. Разделять эти две величины пришлось потому, что смена тарифа
+иначе переписала бы набор входов, то есть правило, а не только учёт.</p>
+{fee_rows}
+
+<h2>Блочный бутстрап</h2>
+<p class="sub">Устойчивость результата к нарезке истории: блоки по 12 и 24 бара, пересборка тысячи раз.
+Смотрим не на «повезло или нет», а на то, уходит ли полоса 5–95 % ниже нуля.</p>
+{bootstrap_rows}
+
+<h2>Режимный фильтр</h2>
+<p class="sub">Единственная проверка, где время идёт только вперёд: решение по закрытому бару, исход через
+12 баров. Здесь же R-1, R-2, R-3 и живая бумажная книга на SOL и XRP.</p>
+{regime_rows}
 
 {model_block}
+
+{does}
+
+{_cal_details}
 </div>
 """
             + case_shell.sources_block(
