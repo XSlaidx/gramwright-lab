@@ -1876,6 +1876,79 @@ def render_body() -> str:
                    "Стоит, чтобы видеть, помогает ли нелинейность."),
     ])
 
+    # ── Издержки: что остаётся на РЕАЛЬНОМ тарифе (проверка 21.10.2026).
+    # Протокол v5 считает 0,04 % на круг — это мейкер. Базовый тейкер Bybit 0,055 % на сторону,
+    # то есть 0,11 % на круг. Числа пересчитываются при сборке из fee-tariff-sensitivity.json:
+    # net = брутто − 0,11 × сделок, поэтому ничего не надо держать в тексте руками.
+    def _fee_block() -> str:
+        try:
+            d = json.load(open(os.path.join(DEMO, "fee-tariff-sensitivity.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        rows = d.get("rows") or []
+        if not rows:
+            return ""
+        per_model: dict[str, list] = {}
+        for r in rows:
+            per_model.setdefault(r["model"], []).append(r)
+        out = []
+        for label, rs in per_model.items():
+            now = " · ".join(f"{_e(r['symbol']).replace('USDT', '')} "
+                             f"{_num(r['net_sum_pct_at_011'], 1, plus=True)} %" for r in rs)
+            was = " · ".join(f"{_num(r['net_sum_pct_at_004'], 1, plus=True)}" for r in rs)
+            lost = sum(float(r["lost_pp_004_to_011"]) for r in rs)
+            short = [r.get("short_gross_pct_per_trade") for r in rs
+                     if r.get("short_gross_pct_per_trade") is not None]
+            note = (f"на тарифе v5 (0,04 %) было {was} %. Смена тарифа съедает "
+                    f"{_num(lost, 1)} п.п. на двух символах.")
+            if short:
+                note += (" Шорты дают брутто " + " / ".join(f"{_num(v, 3, plus=True)} %" for v in short)
+                         + " на сделку — это ниже издержек, поэтому по ним объявлена отдельная "
+                           "гипотеза «только лонги».")
+            out.append(_row("издержки", label, now,
+                            f"{sum(int(r['trades']) for r in rs)} сдел.",
+                            note, "#8a98a6"))
+        head = ('<p class="cap">Издержки на круг: протокол v5 — 0,04 % (мейкер), базовый тейкер '
+                'Bybit — 0,11 %. Колонка «сейчас» — сумма нетто уже на 0,11 %, она считается '
+                'при сборке из gross_sum_pct − 0,11 × число сделок.</p>')
+        return head + "".join(out)
+
+    fee_rows = _fee_block()
+
+    def _model_d_row() -> str:
+        """D — не торговля, а объявленная гипотеза в бумаге: показываем её состояние честно."""
+        jr = _lines("model-d-journal.jsonl")
+        bk = _lines("model-d-book.jsonl")
+        try:
+            decl = json.load(open(os.path.join(DEMO, "model-d-adaptive-hypothesis.json"),
+                                  encoding="utf-8"))
+            hsh = str(decl.get("config_hash", ""))[:12]
+            when = str(decl.get("declared_at", ""))[:10]
+        except (OSError, ValueError):
+            hsh, when = "", ""
+        exits = [r for r in bk if r.get("net_pct") is not None]
+        if exits:
+            net = sum(float(r["net_pct"]) for r in exits)
+            val = f"{_num(net, 2, plus=True)} %"
+            cnt = f"{len(exits)} {_plural(len(exits))}"
+        else:
+            val = f"{len(jr)} реш." if jr else "нет данных"
+            cnt = "книги сделок нет"
+        last = jr[-1] if jr else {}
+        if last:
+            tail = (f"последнее: {_e(last.get('symbol'))} p = {_num(last.get('p_up'), 3)} при пороге "
+                    f"{_num(last.get('q_lo'), 3)}…{_num(last.get('q_hi'), 3)}, ATR "
+                    f"{_num(last.get('atr_pct'), 2)} %, {_e(last.get('regime'))} — {_e(last.get('side'))}.")
+        else:
+            tail = "решений пока нет."
+        note = ("Гипотеза объявлена " + (when or "—") + (f", хеш {hsh}" if hsh else "")
+                + ", до чисел форварда. Порог не константа: 90-й и 10-й перцентиль вероятности "
+                  "за 90 дней, плюс два предохранителя — ATR ≥ 0,4 % и сторона по EMA200. "
+                  "Только бумага, в торговлю не выходит. " + tail)
+        return _row("гипотеза", "«D» перцентиль", val, cnt, note, "#38bdf8")
+
+    model_d_row = _model_d_row()
+
     ai_rows = "".join([
         _row("бумага", "«LLM-советник»",
              _pct(adv_net) if adv_net is not None else f"{len(ai)} реш.",
@@ -2220,6 +2293,8 @@ def render_body() -> str:
 <h3>ИИ</h3>
 {ai_rows}
 {model_rows}
+{model_d_row}
+{fee_rows}
 <details class="how"><summary>Как считается</summary>
 <p>«LLM-советник» — бумажная книга: модель задаёт только направление, выходы считает код.</p>
 <p>«A» long-only и «B» бустинг — те же 14 признаков из часовых свечей, horizon 12 баров, порог 0,60.
