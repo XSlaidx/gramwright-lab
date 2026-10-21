@@ -113,6 +113,9 @@ RECON_CSS = """
 .table-wrap-recon::-webkit-scrollbar-thumb{background:#5b6f95;border-radius:6px;border:3px solid var(--panel)}
 .table-wrap-recon::-webkit-scrollbar-thumb:hover{background:#7189b3}
 .recon-cap{color:var(--mut);font-size:12.5px;margin:6px 0 0;max-width:960px}
+/* Подпись под таблицей зависит от того, что человек реально может сделать: на широком экране
+   прокручивается окно внутри рамки, на телефоне — сама таблица вбок, а страница вниз. */
+.cap-mob{display:none}
 .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1.6;
   border:1px solid transparent;white-space:nowrap;cursor:help}
 .tag-ok{color:var(--ok);border-color:#2b4a35;background:#12251a}
@@ -124,12 +127,21 @@ RECON_CSS = """
    уезжает вместе со строками (проверено на 390/700 px — «шапка не прилипает»). Возвращаем
    табличную раскладку только этому окну; горизонтальную прокрутку берёт на себя обёртка. */
 @media(max-width:700px){
-  .table-wrap-recon table.tr{display:table;width:100%;overflow:visible;white-space:normal}
-  /* На телефоне окно с собственной прокруткой ловит вертикальный жест: палец крутит таблицу, а
-     страница стоит. Ниже 700px окно раскрывается целиком — прокрутка одна, страничная. */
-  .table-wrap-recon{max-height:none;overflow:visible;border:0;border-radius:0}
+  /* ВЕРТИКАЛЬ — страничная, ГОРИЗОНТАЛЬ — своя. Раньше здесь стояло overflow:visible, и на 390 px
+     правая колонка («Симуляция») просто срезалась краем экрана: оболочка сайта гасит переполнение
+     страницы, так что до данных было не добраться. Теперь окно не имеет max-height (вертикального
+     перехвата жеста нет) и прокручивается только вбок — это ожидаемый жест для таблицы. */
+  .table-wrap-recon{max-height:none;overflow-x:auto;overflow-y:hidden;
+    border:1px solid #35507a;border-left:3px solid #6f96c4;border-radius:10px;
+    background:rgba(255,255,255,.06);-webkit-overflow-scrolling:touch}
+  /* Подпись на телефоне читается чаще, чем на десктопе, — делаем её заметнее. */
+  .recon-cap{font-size:13px;color:var(--soft)}
+  /* Колонки не сжимаем до переносов: ширину даёт min-width, читаемость — nowrap. */
+  .table-wrap-recon table.tr{display:table;width:auto;min-width:560px;overflow:visible}
   .table-wrap-recon table.tr th{position:static}
-  .table-wrap-recon table.tr th,.table-wrap-recon table.tr td{white-space:normal}
+  .table-wrap-recon table.tr th,.table-wrap-recon table.tr td{white-space:nowrap}
+  .cap-desk{display:none}
+  .cap-mob{display:inline}
 }
 """
 
@@ -1006,7 +1018,9 @@ def _live_vs_sim_block() -> str:
             f'<th>Инструмент</th><th>Сторона</th><th>Живая</th><th>Симуляция</th><th>Выход</th>'
             f'<th>Почему разошлось</th></tr></thead><tbody>{"".join(body)}</tbody></table></div>'
             f'<p class="recon-cap">↕ Всего {len(rows)} {_plural(len(rows), "строка", "строки", "строк")}'
-            f' · свежие сверху · окно прокручивается внутри рамки, страница не растёт'
+            f' · свежие сверху · <span class="cap-desk">окно прокручивается внутри рамки, '
+            f'страница не растёт</span><span class="cap-mob">таблица прокручивается вбок →, '
+            f'страница — вниз</span>'
             f' · наведите на метку — будет полная причина</p>'
             f'<p class="sub" style="max-width:960px;margin:10px auto 0">{summary}</p>'
             f'<p class="sub" style="max-width:960px;margin:8px auto 0">Время выхода у пары может '
