@@ -2209,10 +2209,22 @@ def render_body() -> str:
                 continue
             ok = all(v["actual_pct"] > max(s["p95"] for s in v["block"].values())
                      and v["cpcv"]["positive_share_pct"] >= 80 for v in blocks.values())
+            # Доходность на сделку: раньше артефакт хранил только сумму процентов, и сравнить
+            # фильтр с A long-only по качеству одного входа было нельзя. Число сделок берём из
+            # отдельного замера (regime-r3-actual-detail.json), а не набираем руками.
+            try:
+                det = json.load(open(os.path.join(DEMO, "regime-r3-actual-detail.json"),
+                                     encoding="utf-8")).get("results") or {}
+            except (OSError, ValueError):
+                det = {}
             parts = []
             for sym, v in blocks.items():
                 cpcv = v["cpcv"]
-                parts.append(f"{sym.replace('USDT', '')}: факт {_num(v['actual_pct'], 1, plus=True)} %, "
+                per = det.get(sym) or {}
+                trade_txt = (f", {per['trades']} сделок · {_num(per['net_mean_pct'], 2, plus=True)} % "
+                             f"на сделку" if per.get("trades") else "")
+                parts.append(f"{sym.replace('USDT', '')}: факт {_num(v['actual_pct'], 1, plus=True)} %"
+                             f"{trade_txt}, "
                              f"выше {_num(100 - max(s['share_ge_actual_pct'] for s in v['block'].values()), 0)} % "
                              f"пересборок, CPCV {cpcv['positive_folds']}/{cpcv['n_folds']}")
             rows_.append(_row("режим", label,
