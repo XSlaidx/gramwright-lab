@@ -1911,7 +1911,37 @@ def render_body() -> str:
         head = ('<p class="cap">Издержки на круг: протокол v5 — 0,04 % (мейкер), базовый тейкер '
                 'Bybit — 0,11 %. Колонка «сейчас» — сумма нетто уже на 0,11 %, она считается '
                 'при сборке из gross_sum_pct − 0,11 × число сделок.</p>')
-        return head + "".join(out)
+
+        # Прогон по объявленной гипотезе «только лонги» (хеш 0c60a0e5f0d5, объявление — до чисел).
+        lo_html = ""
+        try:
+            lo = json.load(open(os.path.join(DEMO, "models-bc-longonly.json"), encoding="utf-8"))
+            cmp_ = lo.get("vs_mixed_at_011") or {}
+            rows_lo = []
+            for label, per in (lo.get("results") or {}).items():
+                if not cmp_:
+                    break
+                now_lo = " · ".join(f"{_e(sym).replace('USDT', '')} "
+                                    f"{_num(m['net_sum_pct'], 1, plus=True)} %" for sym, m in per.items())
+                mixed = " · ".join(f"{_e(k.split(' · ')[-1]).replace('USDT', '')} "
+                                   f"{_num(v['mixed_net_pct'], 1, plus=True)} %"
+                                   for k, v in cmp_.items() if k.startswith(label))
+                delta = sum(float(v["delta_pp"]) for k, v in cmp_.items() if k.startswith(label))
+                trades_lo = sum(int(m["trades"] or 0) for m in per.values())
+                rows_lo.append(_row(
+                    "только лонги", label, now_lo, f"{trades_lo} сдел.",
+                    (f"обе стороны давали {mixed} — разница {_num(delta, 1, plus=True)} п.п. "
+                     f"на двух символах. Сторона объявлена заранее, входы при этом не подгонялись: "
+                     f"фильтр размера хода остался на издержках протокола v5."), "#22c55e"))
+            if rows_lo:
+                lo_html = ('<p class="cap">Тот же прогон с объявленным ограничением «только лонги» '
+                           + (f"(хеш {str(lo.get('hypothesis_hash'))[:12]}, "
+                              f"объявление до чисел) — " if lo.get("hypothesis_hash") else "— ")
+                           + 'входы считались по тем же правилам, изменилась только сторона.</p>'
+                           + "".join(rows_lo))
+        except (OSError, ValueError, KeyError):
+            lo_html = ""
+        return head + "".join(out) + lo_html
 
     fee_rows = _fee_block()
 
