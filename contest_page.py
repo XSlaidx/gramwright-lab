@@ -2016,48 +2016,57 @@ def render_body() -> str:
         Все числа считаются при сборке из block-bootstrap.json. Если файла нет — блока нет:
         пустая рамка «данных нет» здесь хуже, чем отсутствие блока.
         """
-        try:
-            d = json.load(open(os.path.join(DEMO, "block-bootstrap.json"), encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-        res = d.get("results") or {}
-        if not res:
+        # Обе гипотезы (B-1 на 12 000 баров и B-2 на 24 000) показываются ОДНОЙ таблицей:
+        # по строке на связку, в значении — оба окна рядом. Так сразу видно, что вывод зависит
+        # от периода: на коротком окне BTC −24,14 %, на длинном +12,84 %.
+        files = (("block-bootstrap.json", "B-1"), ("block-bootstrap-b2.json", "B-2"))
+        merged: dict[str, list] = {}
+        heads = []
+        for fn, tag in files:
+            try:
+                d = json.load(open(os.path.join(DEMO, fn), encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            for key, v in (d.get("results") or {}).items():
+                if v.get("block"):
+                    merged.setdefault(key, []).append((tag, d, v))
+            heads.append(
+                f'{tag}: окно {format(int(d.get("window_bars") or 0), ",d").replace(",", " ")} баров, '
+                f'{int(d.get("replicas") or 0)} пересборок, хеш '
+                f'<code>{str(d.get("hypothesis_hash") or "")[:12]}</code>')
+        if not merged:
             return ""
         rows_ = []
-        for key, v in res.items():
-            actual = float(v.get("actual_pct") or 0)
-            blocks = v.get("block") or {}
-            if not blocks:
-                continue
-            above = all(actual > float(b.get("p95", 0)) for b in blocks.values())
-            tail = " · ".join(f"блок {b}: медиана {_num(s['p50'], 2, plus=True)} %, "
-                              f"не хуже факта {_num(s['share_ge_actual_pct'], 0)} %"
-                              for b, s in blocks.items())
+        for key, items in merged.items():
+            parts, notes, any_above = [], [], False
+            for tag, d, v in items:
+                blocks = v["block"]
+                actual = float(v.get("actual_pct") or 0)
+                above = all(actual > float(b.get("p95", 0)) for b in blocks.values())
+                any_above = any_above or above
+                win = format(int(d.get("window_bars") or 0), ",d").replace(",", " ")
+                parts.append(f"{win}: {_num(actual, 2, plus=True)} %")
+                notes.append(
+                    f'{win} — медиана ' +
+                    " / ".join(_num(s["p50"], 1, plus=True) for s in blocks.values()) +
+                    f' %, не хуже факта ' +
+                    " / ".join(_num(s["share_ge_actual_pct"], 0) for s in blocks.values()) + " %")
             sym_, mod_ = ((key.split(" · ")[0], " · ".join(key.split(" · ")[1:]))
                           if " · " in key else ("", key))
             rows_.append(_row("бутстрап", f"{sym_.replace('USDT', '')} · {mod_}",
-                              f"{_num(actual, 2, plus=True)} %",
-                              "выше 95 %" if above else "внутри полосы",
-                              f"{tail}. "
-                              f"Полоса блока 12: {_num(list(blocks.values())[0]['p05'], 1, plus=True)}…"
-                              f"{_num(list(blocks.values())[0]['p95'], 1, plus=True)} %.",
+                              " · ".join(parts),
+                              "выше 95 %" if any_above else "внутри полосы",
+                              "Блоки 12 и 24 бара: " + "; ".join(notes) + ".",
                               "#8a98a6"))
-        if not rows_:
-            return ""
-        hsh = str(d.get("hypothesis_hash") or "")[:12]
-        # Числа с разрядностью готовим отдельно: .replace() поверх склеенной f-строки
-        # снимал ВСЕ запятые в предложении, а не только разделитель разрядов.
-        n_rep = int(d.get("replicas") or 0)
-        n_win = format(int(d.get("window_bars") or 0), ",d").replace(",", " ")
-        head = (f'<p class="cap">Правило против <b>перемешанного рынка</b>: ряд режется на блоки по '
-                f'12 и 24 бара, блоки берутся в случайном порядке с возвращением, доходности '
-                f'сохраняются, а тренд и порядок — нет; на каждой такой «альтернативной реальности» '
-                f'прогоняется то же правило. {n_rep} пересборок, окно {n_win} баров, '
-                f'тариф {_num(d.get("cost_pct"), 2)} % на круг'
-                + (f'. Гипотеза объявлена до чисел, хеш <code>{hsh}</code>.' if hsh else ".")
-                + ' <b>Оговорка:</b> окно — медвежьи 1,4 года, а бутстрап стирает тренд, поэтому '
-                  'для long-only правила сравнение смещено в минус: «внутри полосы» здесь значит '
-                  '«преимущество не доказано», а не «опровергнуто».</p>')
+        head = ('<p class="cap">Правило против <b>перемешанного рынка</b>: ряд режется на блоки по '
+                '12 и 24 бара, блоки берутся в случайном порядке с возвращением, доходности '
+                'сохраняются, а тренд и порядок — нет; на каждой такой «альтернативной реальности» '
+                'прогоняется то же правило, тариф 0,11 % на круг. ' + " · ".join(heads) + '. '
+                'Обе гипотезы объявлены до чисел. <b>Оговорка:</b> короткое окно — медвежьи 1,4 '
+                'года, а бутстрап стирает тренд, поэтому для long-only правила сравнение смещено '
+                'в минус; именно поэтому B-2 взяла окно 2,8 года, где есть и рост, и падение. '
+                '«Внутри полосы» здесь значит «преимущество не доказано», а не '
+                '«опровергнуто».</p>')
         return head + "".join(rows_)
 
     bootstrap_rows = _bootstrap_block()
