@@ -535,8 +535,11 @@ def _mt5_status(rows: list[dict], mt5: dict, trading: bool) -> str:
     # который уже стоит на счёте, на странице не появлялся вовсе — и выглядело так, будто
     # контур его не сделал. Пишем её отдельным фактом: инструмент, сторона, лот, цена, сколько
     # минут в рынке и стоит ли защита (стоп/тейк). Данные — из state.open, а не из догадки.
-    _op = (mt5 or {}).get("open") or {}
-    if _op.get("symbol"):
+    _ops = (mt5 or {}).get("opens")
+    if not isinstance(_ops, list) or not _ops:
+        _one = (mt5 or {}).get("open")
+        _ops = [_one] if isinstance(_one, dict) else []
+    for _op in [x for x in _ops if isinstance(x, dict) and x.get("symbol")]:
         _side = "покупка" if int(_op.get("side") or 0) > 0 else "продажа"
         _mins = None
         try:
