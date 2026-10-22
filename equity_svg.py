@@ -306,6 +306,18 @@ def _fmt_day(ms: int) -> str:
     return time.strftime("%d.%m", time.gmtime(ms / 1000))
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русское число с правильной формой слова (1 сделка · 2 сделки · 5 сделок)."""
+    n = abs(int(n))
+    if n % 100 in (11, 12, 13, 14):
+        return many
+    if n % 10 == 1:
+        return one
+    if n % 10 in (2, 3, 4):
+        return few
+    return many
+
+
 def chart(width: int = 900, height: int = 330) -> str:
     d = series()
     pts: list[tuple[int, float]] = []
@@ -323,9 +335,9 @@ def chart(width: int = 900, height: int = 330) -> str:
     if d.get("live"):
         pts.append((d["anchor"], 0.0))
         pts += list(zip(d["live"]["stamps"], d["live"]["values"]))
-    if d.get("inverse"):
-        pts.append((d["anchor"], 0.0))
-        pts += list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
+    # «Наоборот» в шкалу НЕ входит: он доходит до −30 % и прижимал правило, живой счёт и монетку
+    # к нулю (замечание владельца 22.10.2026). Его линия обрезается по нижней границе и об этом
+    # сказано подписью — иначе график «честный», но нечитаемый.
     if d.get("okx"):
         pts.append((d["anchor"], 0.0))
         pts += list(d["okx"]["points"])
@@ -430,7 +442,8 @@ def chart(width: int = 900, height: int = 330) -> str:
     if d.get("inverse"):
         pairs = list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
         pts_i, prev_v = _step_points(d["anchor"], pairs, now_ms)
-        i_pts = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in _px_collapse(pts_i, sx))
+        # обрезка по нижней границе шкалы: значение ниже lo рисуем на самом низу
+        i_pts = " ".join(f"{x:.1f},{sy(max(v, lo)):.1f}" for x, v in _px_collapse(pts_i, sx))
         out.append(f'<polyline points="{i_pts}" fill="none" stroke="{INV_C}" stroke-width="2.2" '
                    f'stroke-opacity="0.95" stroke-dasharray="6 4" stroke-linejoin="miter" '
                    f'stroke-linecap="butt"/>')
@@ -440,9 +453,12 @@ def chart(width: int = 900, height: int = 330) -> str:
             out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="2.6" fill="{INV_C}">'
                        f'<title>{_fmt_day(int(ms))} · наоборот {v:+.2f} %</title></circle>')
         _last = _collapse(pairs)[-1][0]
-        out.append(f'<circle cx="{sx(_last):.1f}" cy="{sy(prev_v):.1f}" r="4" '
+        out.append(f'<circle cx="{sx(_last):.1f}" cy="{sy(max(prev_v, lo)):.1f}" r="4" '
                    f'fill="none" stroke="{INV_C}" stroke-width="2">'
                    f'<title>наоборот · итог {prev_v:+.2f} %</title></circle>')
+        if prev_v < lo:
+            out.append(f'<text x="{L + 4}" y="{T + H - 6}" fill="{INV_C}" font-size="11">'
+                       f'«Наоборот» {prev_v:+.1f} % — ниже шкалы, линия обрезана</text>')
 
     # советник (бумажная книга): один момент выхода = одна ступенька
     if d.get("advisor"):
@@ -455,7 +471,7 @@ def chart(width: int = 900, height: int = 330) -> str:
             if ms <= d["anchor"]:
                 continue
             n = sum(1 for m, _ in pairs if m == ms)
-            more = f" ({n} сделки)" if n > 1 else ""
+            more = f" ({n} {_plural(n, 'сделка', 'сделки', 'сделок')})" if n > 1 else ""
             out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="3" fill="{ADVISOR_C}">'
                        f'<title>{_fmt_day(int(ms))} · советник {v:+.2f} %{more}</title></circle>')
         _last = _collapse(pairs)[-1][0]
