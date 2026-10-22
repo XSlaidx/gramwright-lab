@@ -2253,6 +2253,27 @@ def render_body() -> str:
                  f"не то число, которое получает счёт."),
                 "#38bdf8"))
 
+        # Переносимость на TradFi (MT5): тот же фильтр на золоте и EURUSD с их реальными издержками.
+        # Проверка опубликована потому, что она ОТРИЦАТЕЛЬНАЯ — иначе стенд перестал бы быть проверкой.
+        try:
+            tf = json.load(open(os.path.join(DEMO, "regime-tradfi.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            tf = {}
+        for sym in ("XAUUSD", "EURUSD"):
+            m = (tf.get("results") or {}).get(sym) or {}
+            if not m.get("trades"):
+                continue
+            rows_.append(_row(
+                "режим", f"{sym} · тот же фильтр на MT5",
+                f"{_num(m.get('net_mean_pct'), 3, plus=True)} %/сделку",
+                f"{int(m.get('trades') or 0)} сдел.",
+                (f"Издержки инструмента, а не криптовый тариф: {_num(m.get('cost_round_trip_pct'), 3)} % "
+                 f"на круг (в 3–8 раз ниже). Итог: CAGR {_num(m.get('cagr_pct'), 1, plus=True)} %, "
+                 f"просадка {_num(m.get('max_drawdown_pct'), 1)} %, Sharpe {_num(m.get('sharpe'), 2)}. "
+                 f"Перенос не подтверждён: на золоте эдж отрицательный, на EURUSD ноль — дело не в "
+                 f"издержках, а в том, что признаки обучены на крипте."),
+                "#f97316"))
+
         # D-2: проверка того же фильтра на ДРУГИХ входах (перцентиль модели D). Отрицательный
         # результат публикуется наравне с положительным — иначе стенд перестаёт быть проверкой.
         try:
