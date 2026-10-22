@@ -682,6 +682,69 @@ def _model_window_note() -> str:
     return base + (f" Решений по новой гипотезе: {len(hyp)}." if hyp else "")
 
 
+def _portfolio_chart() -> str:
+    """Кривая портфеля из четырёх рукавов — по месяцам, из regime-sizing.json.
+
+    Зачем рисунок, а не только строка: сила портфеля видна в том, что четыре шумных рукава
+    складываются в ровную линию. Одним числом это не показать.
+    """
+    try:
+        d = json.load(open(os.path.join(DEMO, "regime-sizing.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    variants = d.get("variants") or {}
+    eq = (variants.get("equal") or {})
+    pts = eq.get("curve_monthly") or []
+    if len(pts) < 6:
+        return ""
+    vals = [v for _, v in pts]
+    lo, hi = min(vals), max(vals)
+    span = (hi - lo) or 1.0
+    w, h, pad_l, pad_b = 900, 210, 46, 26
+    inner_w, inner_h = w - pad_l - 12, h - pad_b - 14
+
+    def xy(i: int, v: float) -> tuple[float, float]:
+        x = pad_l + inner_w * i / max(len(pts) - 1, 1)
+        y = 14 + inner_h * (1 - (v - lo) / span)
+        return x, y
+
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in
+                    (xy(i, v) for i, (_, v) in enumerate(pts)))
+    # максимальная просадка на кривой
+    peak, dd, dd_i = vals[0], 0.0, 0
+    for i, v in enumerate(vals):
+        peak = max(peak, v)
+        cur = (peak - v) / peak
+        if cur > dd:
+            dd, dd_i = cur, i
+    dd_x, dd_y = xy(dd_i, vals[dd_i])
+    labels = (f'<text x="{pad_l}" y="{h-8}" fill="var(--muted-foreground)" font-size="11">'
+              f'{pts[0][0]}</text>'
+              f'<text x="{w-12}" y="{h-8}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">{pts[-1][0]}</text>'
+              f'<text x="{pad_l-8}" y="{14+6}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">×{hi:.2f}</text>'
+              f'<text x="{pad_l-8}" y="{14+inner_h}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">×{lo:.2f}</text>')
+    return (f'<h2>Кривая портфеля: четыре рукава по 25 %</h2>'
+            f'<p class="sub">Четыре символа торгуются независимо, у каждого своя четверть капитала '
+            f'и одна позиция за раз. Вход и выход — прежние (p ≥ 0,60 и режим, выход через 12 баров, '
+            f'тариф 0,11 %); изменился только учёт: размер берётся от текущего капитала. '
+            f'Итог ×{_num(eq.get("equity_multiple"), 2)} за {_num(eq.get("years"), 1)} года, '
+            f'максимальная просадка {_num(eq.get("max_drawdown_pct"), 1)} % '
+            f'(точка отмечена), Sharpe {_num(eq.get("sharpe_monthly"), 2)}. '
+            f'Средняя загрузка капитала {_num(eq.get("avg_exposure_pct"), 1)} %: деньги большую '
+            f'часть времени свободны — это запас на сглаживание, а не простой.</p>'
+            f'<div class="chart-wrap" style="max-width:960px;margin:0 auto 14px">'
+            f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" role="img" '
+            f'aria-label="Кривая капитала портфеля по месяцам">'
+            f'<line x1="{pad_l}" y1="{14+inner_h}" x2="{w-12}" y2="{14+inner_h}" '
+            f'stroke="var(--border)" stroke-width="1"/>'
+            f'<polyline points="{line}" fill="none" stroke="#22c55e" stroke-width="2"/>'
+            f'<circle cx="{dd_x:.1f}" cy="{dd_y:.1f}" r="4" fill="#f97316"/>'
+            f'{labels}</svg></div>')
+
+
 def _adv_hyp_episodes() -> dict:
     """Сделки новой гипотезы, свёрнутые в НЕЗАВИСИМЫЕ эпизоды.
 
@@ -2256,7 +2319,14 @@ def render_body() -> str:
         # Портфель: четыре рукава по 25 %. Отвечает на вопрос «что со счётом, когда символы работают
         # вместе», а не «какой символ лучше».
         try:
-            pf = json.load(open(os.path.join(DEMO, "regime-portfolio.json"), encoding="utf-8"))
+            # Канонический вариант учёта — сайзинг с ребалансировкой на каждой сделке (размер
+            # берётся от текущего капитала). Вариант с фиксированными рукавами дал CAGR 11,6 %
+            # вместо 15,4 % при той же просадке: разница в способе учёта, и она названа в тексте.
+            sz = json.load(open(os.path.join(DEMO, "regime-sizing.json"), encoding="utf-8"))
+            pf = dict((sz.get("variants") or {}).get("equal") or {})
+            pf["months"] = len(pf.get("curve_monthly") or [])
+            pf["sharpe_monthly"] = pf.get("sharpe_monthly")
+            pf["_fixed_sleeves_cagr"] = 11.6
         except (OSError, ValueError):
             pf = {}
         if pf.get("equity_multiple"):
@@ -2268,8 +2338,13 @@ def render_body() -> str:
                  f"максимальная просадка {_num(pf.get('max_drawdown_pct'), 1)} % против "
                  f"17–32 % у отдельных символов, Sharpe {_num(pf.get('sharpe_monthly'), 2)} против "
                  f"0,15–0,79, худший месяц {_num(pf.get('worst_month_pct'), 1, plus=True)} %, "
-                 f"лучший {_num(pf.get('best_month_pct'), 1, plus=True)} %. Корзина сглаживает "
-                 f"эквити: SOL с нулевым итогом не топит счёт, потому что его доля ограничена 25 %."),
+                 f"лучший {_num(pf.get('best_month_pct'), 1, plus=True)} %. Средняя загрузка "
+                 f"капитала {_num(pf.get('avg_exposure_pct'), 1)} %, максимум "
+                 f"{_num(pf.get('max_exposure_pct'), 0)} % — плеча нет. Корзина сглаживает эквити: "
+                 f"SOL с нулевым итогом не топит счёт, потому что его доля ограничена 25 %. "
+                 f"Если рукава не ребалансировать, а держать фиксированными, тот же портфель даёт "
+                 f"CAGR {_num(pf.get('_fixed_sleeves_cagr'), 1)} % при той же просадке — разница "
+                 f"только в способе учёта."),
                 "#22c55e"))
 
         # Переносимость на MT5 проверялась (результат отрицательный) и по решению владельца
@@ -2741,6 +2816,8 @@ def render_body() -> str:
 <p class="sub">Единственная проверка, где время идёт только вперёд: решение по закрытому бару, исход через
 12 баров. Здесь же R-1, R-2, R-3 и живая бумажная книга на SOL и XRP.</p>
 {regime_rows}
+
+{_portfolio_chart()}
 
 {model_block}
 
