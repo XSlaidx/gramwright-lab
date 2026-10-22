@@ -723,6 +723,59 @@ def _clustered_txt(symbol: str) -> str:
             f"наложений {_num(v.get('overlap_pct'), 1)} %, поэтому t по сделкам завышен.")
 
 
+def _pool_block() -> str:
+    """Доказательство по пулу (POOL-T-2): правило остановки объявлено до чисел.
+
+    22.10.2026 выяснилось, что по отдельности ни один символ не доказуем (BTC 6 лет, ETH 8 лет,
+    SOL 226 лет), а пул из четырёх даёт t = 1,71 на 378 сделках. Поэтому единица доказательства —
+    пул, и статус считается из объявленных границ, а не выбирается словами.
+    """
+    try:
+        d = json.load(open(os.path.join(DEMO, "pool-t2.json"), encoding="utf-8"))
+        h = json.load(open(os.path.join(DEMO, "pool-t2-hypothesis.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    pool = d.get("pool") or {}
+    if not pool.get("n"):
+        return ""
+    st = d.get("status") or "unresolved"
+    color = {"proven": "#4ade80", "refuted": "#f87171",
+             "refuted_early": "#f87171"}.get(st, "#f59e0b")
+    title = {"proven": "доказано", "refuted": "опровергнуто",
+             "refuted_early": "опровергнуто досрочно"}.get(st, "не решено")
+    syms = h.get("symbols") or []
+    n = int(pool["n"])
+    need_now = (2.0 * float(pool["sd"]) / abs(float(pool["mean"]))) ** 2 if pool["mean"] else 0
+    note = (f"Среднее {_num(pool['mean'], 3, plus=True)} % на сделку · sd {_num(pool['sd'], 2)} · "
+            f"<b>t = {_num(pool['t'], 2)}</b> · статус: <b style=\"color:{color}\">{title}</b>. "
+            f"{_e(str(d.get('status_text') or '').rstrip('.'))}. "
+            f"Правило остановки объявлено {_e(str(h.get('declared_at'))[:16])} "
+            f"(хеш {_e(str(h.get('config_hash'))[:8])}): доказано при t ≥ 2,00; опровергнуто, если "
+            f"на 520 сделках t &lt; 1,00; досрочно опровергнуто при t &lt; 0 после 200 сделок. "
+            f"Планка «≈520 сделок» объявлена заранее; при текущем среднем и разбросе до t = 2,00 "
+            f"нужно ≈{_num(need_now, 0)} — цифра уточняется по разбросу, порог 2,00 не меняется. "
+            f"Темп истории {_num(d.get('trades_per_year'), 0)} сделок в год. "
+            f"<b>Это история, а не доказательство:</b> доказательством станет пул живых сделок по "
+            f"тому же правилу — порог 0,60 и список символов заморожены.")
+    return ('<h2>Доказательство: пул, а не символ</h2>'
+            '<p class="sub">Ни один символ по отдельности не доказуем: чтобы t дошло до 2, BTC нужно '
+            '272 сделки (6,1 года), ETH 411 (8,3), XRP 319 (4,7), SOL 6 182 (226 лет). '
+            'Пул складывает сделки всех символов в одно наблюдение — это и есть объявленная '
+            'единица доказательства.</p>'
+            '<p class="sub">Символы объявления: ' + ", ".join(x.replace("USDT", "") for x in syms)
+            + '. Список заморожен до конца испытания — добавлять символы после того, как увидели '
+              'результат, запрещено.</p>'
+            + (f'<div class="rrow" style="--c:{color}">'
+               f'<div class="rname"><span class="rb" style="background:{_tint(color, 0.15)};'
+               f'border-color:{_tint(color, 0.45)}">доказательство</span>'
+               f'<b>пул · {len(syms)} символов</b></div>'
+               f'<div class="rval">t = {_num(pool["t"], 2)}'
+               f'<span class="rn"> · {n} {_plural(n, "сделка", "сделки", "сделок")}</span></div>'
+               f'<div class="rnote">{note}</div></div>')
+            + '<p class="sub">Правило целиком и перечень запретов — на странице '
+              '<a href="/lab/research/">«Исследование (не результат)»</a>.</p>')
+
+
 def _portfolio_chart() -> str:
     """Кривая портфеля из четырёх рукавов — по КАЖДОЙ сделке, из regime-sizing.json.
 
@@ -2876,6 +2929,7 @@ def render_body() -> str:
             + '<div class="tpane" id="tabpane-0" role="tabpanel" aria-labelledby="tabbtn-0" '
               'data-tab="0" data-active="1">'
             + (lock_note if lock_note else "")
+            + _pool_block()
             + scale_block
             + case_shell.chart_block(
                 equity_svg.chart(groups="rule"), equity_svg.legend("rule"),
