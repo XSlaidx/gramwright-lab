@@ -2232,6 +2232,27 @@ def render_body() -> str:
                               "2 символа" if len(blocks) == 2 else f"{len(blocks)} симв.",
                               "; ".join(parts) + ".", "#22c55e" if ok else "#f97316"))
 
+        # Риск-профиль счёта: одна позиция на символ, капитал реинвестируется. Отвечает на вопрос
+        # покупателя «как выглядит счёт», а не «сколько дают сигналы».
+        try:
+            eq = json.load(open(os.path.join(DEMO, "regime-equity.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            eq = {}
+        for sym, m in (eq.get("results") or {}).items():
+            if not m.get("trades"):
+                continue
+            rows_.append(_row(
+                "режим", f"{sym.replace('USDT', '')} · что видно на счёте",
+                f"CAGR {_num(m.get('cagr_pct'), 1, plus=True)} %",
+                f"{int(m.get('trades') or 0)} сдел.",
+                (f"Одна позиция на символ, капитал реинвестируется: итог ×{_num(m.get('equity_multiple'), 2)}, "
+                 f"максимальная просадка {_num(m.get('max_drawdown_pct'), 1)} %, Sharpe "
+                 f"{_num(m.get('sharpe'), 2)}, в позиции {_num(m.get('time_in_market_pct'), 1)} % времени, "
+                 f"худший месяц {_num((m.get('worst_month') or {}).get('sum_pct'), 1, plus=True)} %. "
+                 f"Сумма процентов по всем входам без лимита позиций была бы кратно выше — и это "
+                 f"не то число, которое получает счёт."),
+                "#38bdf8"))
+
         # D-2: проверка того же фильтра на ДРУГИХ входах (перцентиль модели D). Отрицательный
         # результат публикуется наравне с положительным — иначе стенд перестаёт быть проверкой.
         try:
