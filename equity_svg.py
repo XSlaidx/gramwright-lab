@@ -28,7 +28,6 @@ COIN_C = "#f59e0b"      # контроль — янтарный
 HOLD_C = "#f472b6"      # владение: розовый — тот же цвет, что у карточки участника
 GRID_C = "#1c2a44"
 ADVISOR_C = "#8a98a6"   # советник: бумажная книга, серый — как на его карточке
-INV_C = "#f97316"       # «Наоборот»: те же входы, перевёрнутая сторона — цвет его карточки
 LIVE_C = "#a78bfa"      # живой счёт: фиолетовый — как на карточке и плашке состояния
 OKX_C = "#2dd4bf"       # книга OKX: бирюза, чтобы не путалась с фиолетовым живым счётом
 # Порог для линии на графике — не «красиво», а осмысленно: две-три точки дают ломаную,
@@ -111,10 +110,9 @@ def series() -> dict:
 
     advisor = _advisor_path()
     live = _live_path()
-    inverse = _inverse_path()
     okx = _okx_path()
     return {"anchor": anchor, "stamps": stamps, "rule": rule, "holding": holding, "coin": coin,
-            "advisor": advisor, "live": live, "inverse": inverse,
+            "advisor": advisor, "live": live,
             # okx_n и okx_pct есть всегда, okx (линия) — только когда выборки хватает
             "okx_n": (okx or {}).get("n", 0), "okx_pct": (okx or {}).get("pct"),
             "okx_usdt": (okx or {}).get("usdt"),
@@ -168,37 +166,6 @@ def _okx_path():
         if i < len(stamps_ms):
             points.append((stamps_ms[i], round(acc, 3)))
     return {"points": points, "n": len(exits), "pct": round(acc, 3), "usdt": round(usdt, 4)}
-
-
-def _inverse_path():
-    """Контроль «Наоборот»: накопленный итог по времени выхода.
-
-    Точки считаются в bees/inverse_control.py по публичным свечам, поэтому ряд существует даже
-    там, где сделок не было: это расчёт, а не исполнение. На графике он пунктирный.
-    """
-    path = os.path.join(DEMO, "inverse-control-book.jsonl")
-    if not os.path.exists(path):
-        return None
-    stamps, acc, vals = [], 0.0, []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                stamps.append(int(rec.get("exit_ms") or rec.get("entry_ms") or 0))
-                acc += float(rec.get("net_pct") or 0)
-                vals.append(round(acc, 3))
-    except OSError:
-        return None
-    if not stamps:
-        return None
-    order = sorted(range(len(stamps)), key=lambda i: stamps[i])
-    return {"stamps": [stamps[i] for i in order], "values": [vals[i] for i in order]}
 
 
 def _advisor_path():
@@ -318,8 +285,28 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
-def chart(width: int = 900, height: int = 330) -> str:
-    d = series()
+CHARTS = {
+    # Два графика вместо одного с шестью-семью линиями (требование владельца 22.10.2026):
+    # на первом правило и его контроли, на втором — всё остальное.
+    "rule": ("Правило и его контроли",
+             "Путь правила, линия простого владения и полоса 200 бросков монетки на тех же входах."),
+    "other": ("Остальные книги",
+              "Живой счёт, бумажный советник и книга OKX. Правило намеренно не показано — "
+              "его кривая на первом графике, а наложение пяти-шести линий делало оба нечитаемыми."),
+}
+
+
+def _only(d: dict, groups: str) -> dict:
+    """Оставляет в данных только серии нужной фигуры, остальное гасит (None, а не нулём)."""
+    if groups == "rule":
+        return {**d, "advisor": None, "live": None, "okx": None}
+    if groups == "other":
+        return {**d, "rule": [], "holding": None, "coin": None}
+    return d
+
+
+def chart(width: int = 900, height: int = 330, groups: str = "all") -> str:
+    d = _only(series(), groups)
     pts: list[tuple[int, float]] = []
     if d["rule"] and d["anchor"]:
         pts.append((d["anchor"], 0.0))
@@ -335,9 +322,6 @@ def chart(width: int = 900, height: int = 330) -> str:
     if d.get("live"):
         pts.append((d["anchor"], 0.0))
         pts += list(zip(d["live"]["stamps"], d["live"]["values"]))
-    # «Наоборот» в шкалу НЕ входит: он доходит до −30 % и прижимал правило, живой счёт и монетку
-    # к нулю (замечание владельца 22.10.2026). Его линия обрезается по нижней границе и об этом
-    # сказано подписью — иначе график «честный», но нечитаемый.
     if d.get("okx"):
         pts.append((d["anchor"], 0.0))
         pts += list(d["okx"]["points"])
@@ -373,8 +357,6 @@ def chart(width: int = 900, height: int = 330) -> str:
         _parts.append("советник, бумажная книга")
     _parts.append("полоса случайной монетки 5–95 %")
     _parts.append("линия владения")
-    if d.get("inverse"):
-        _parts.append("пунктир «Наоборот» — те же входы советника с перевёрнутой стороной")
     if d.get("okx"):
         _parts.append(f"книга OKX, {d['okx_n']} закрытых сделок")
     _ends = [f"правило {last_txt}"]
@@ -382,8 +364,6 @@ def chart(width: int = 900, height: int = 330) -> str:
         _ends.append(f"живой счёт {_pct_txt(d['live']['values'][-1])}")
     if d.get("advisor"):
         _ends.append(f"советник {_pct_txt(d['advisor']['values'][-1])}")
-    if d.get("inverse"):
-        _ends.append(f"наоборот {_pct_txt(d['inverse']['values'][-1])}")
     if d.get("okx"):
         _ends.append(f"OKX {_pct_txt(d['okx']['pct'])}")
     aria = "График: " + ", ".join(_parts) + ". Последние точки: " + ", ".join(_ends)
@@ -436,29 +416,6 @@ def chart(width: int = 900, height: int = 330) -> str:
         h = " ".join(f"{sx(ms):.1f},{sy(v):.1f}" for ms, v in zip(d["stamps"], d["holding"]))
         out.append(f'<polyline points="{h}" fill="none" stroke="{HOLD_C}" stroke-width="2" '
                    f'stroke-opacity="0.85" stroke-linejoin="round"/>')
-
-    # «Наоборот» — контроль: те же входы советника, сторона перевёрнута. Пунктир = расчёт по свечам,
-    # биржа этих сделок не исполняла, поэтому линия визуально отличается от живых.
-    if d.get("inverse"):
-        pairs = list(zip(d["inverse"]["stamps"], d["inverse"]["values"]))
-        pts_i, prev_v = _step_points(d["anchor"], pairs, now_ms)
-        # обрезка по нижней границе шкалы: значение ниже lo рисуем на самом низу
-        i_pts = " ".join(f"{x:.1f},{sy(max(v, lo)):.1f}" for x, v in _px_collapse(pts_i, sx))
-        out.append(f'<polyline points="{i_pts}" fill="none" stroke="{INV_C}" stroke-width="2.2" '
-                   f'stroke-opacity="0.95" stroke-dasharray="6 4" stroke-linejoin="miter" '
-                   f'stroke-linecap="butt"/>')
-        for ms, v in _collapse(pairs):
-            if ms <= d["anchor"]:
-                continue
-            out.append(f'<circle cx="{sx(ms):.1f}" cy="{sy(v):.1f}" r="2.6" fill="{INV_C}">'
-                       f'<title>{_fmt_day(int(ms))} · наоборот {v:+.2f} %</title></circle>')
-        _last = _collapse(pairs)[-1][0]
-        out.append(f'<circle cx="{sx(_last):.1f}" cy="{sy(max(prev_v, lo)):.1f}" r="4" '
-                   f'fill="none" stroke="{INV_C}" stroke-width="2">'
-                   f'<title>наоборот · итог {prev_v:+.2f} %</title></circle>')
-        if prev_v < lo:
-            out.append(f'<text x="{L + 4}" y="{T + H - 6}" fill="{INV_C}" font-size="11">'
-                       f'«Наоборот» {prev_v:+.1f} % — ниже шкалы, линия обрезана</text>')
 
     # советник (бумажная книга): один момент выхода = одна ступенька
     if d.get("advisor"):
@@ -574,23 +531,22 @@ def threshold_note() -> str:
             f"{MIN_LINE_TRADES}. ")
 
 
-def legend() -> str:
+def legend(groups: str = "all") -> str:
+    """Подписи под конкретной фигурой: у каждого из двух графиков свой набор цветов."""
     d = series()
     advisor = (f'<span><i style="background:{ADVISOR_C}"></i>советник, бумажная книга</span>'
-               if d.get("advisor") else "")
+               if d.get("advisor") and groups != "rule" else "")
     live = (f'<span><i style="background:{LIVE_C}"></i>живой счёт: исполнено биржей</span>'
-            if d.get("live") else "")
-    inverse = (f'<span><i style="background:{INV_C}"></i>«Наоборот»: те же входы советника, '
-               f'сторона перевёрнута (расчёт по свечам)</span>' if d.get("inverse") else "")
-    return ('<div class="eq-legend">'
-            f'<span><i style="background:{RULE_C}"></i>правило, симуляция «Тренд»</span>'
-            + live + advisor +
-            f'<span><i style="background:{COIN_C};opacity:.75"></i>монетка: 5–95 % из 200 путей</span>'
-            f'<span><i style="background:{HOLD_C}"></i>владение: купить и держать</span>'
-            + inverse +
-            (f'<span><i style="background:{OKX_C}"></i>OKX · исполнение (демо), '
-             f'{d["okx_n"]} сделок</span>' if d.get("okx") else "") +
-            '</div>')
+            if d.get("live") and groups != "rule" else "")
+    okx = (f'<span><i style="background:{OKX_C}"></i>OKX · исполнение (демо), '
+           f'{d["okx_n"]} сделок</span>' if d.get("okx") and groups != "rule" else "")
+    rule = (f'<span><i style="background:{RULE_C}"></i>правило, симуляция «Тренд»</span>'
+            if groups != "other" else "")
+    coin = (f'<span><i style="background:{COIN_C};opacity:.75"></i>монетка: 5–95 % из 200 путей</span>'
+            if groups != "other" else "")
+    hold = (f'<span><i style="background:{HOLD_C}"></i>владение: купить и держать</span>'
+            if groups != "other" else "")
+    return '<div class="eq-legend">' + live + advisor + rule + coin + hold + okx + '</div>'
 
 
 def spark(kind: str, w: int = 132, h: int = 34) -> str:
