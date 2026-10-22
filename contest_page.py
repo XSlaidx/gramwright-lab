@@ -736,7 +736,8 @@ def _pool_block() -> str:
             return {}
 
     live, hist = _load("pool-t2-live.json"), _load("pool-t2.json")
-    decl = _load("pool-t3-hypothesis.json") or _load("pool-t2-hypothesis.json")
+    decl = (_load("pool-t4-hypothesis.json") or _load("pool-t3-hypothesis.json")
+            or _load("pool-t2-hypothesis.json"))
     if not hist.get("pool", {}).get("n") and not live:
         return ""
     syms = decl.get("symbols") or []
@@ -752,25 +753,27 @@ def _pool_block() -> str:
              "collecting": "набирается"}.get(st, "не решено")
     color = {"proven": "#4ade80", "refuted": "#f87171",
              "refuted_early": "#f87171"}.get(st, "#f59e0b")
-    need = 680          # POOL-T-3: фиксированный горизонт в сделках
-    pct = min(100.0, 100.0 * n_live / need)
+    # POOL-T-4: горизонт в КЛАСТЕРАХ (единица информации), а не в сделках
+    cl_n = int(cl.get("clusters") or 0)
+    need_cl = int(live.get("horizon_clusters") or 210)
+    pct = min(100.0, 100.0 * cl_n / max(need_cl, 1))
     live_note = (f"кластерный z = {_num(z_live, 2)} · наивный t = {_num(t_live, 2)} · "
                  f"кластеров {int(cl.get('clusters') or 0)} на {n_live} "
                  f"{_plural(n_live, 'сделке', 'сделках', 'сделках')} · статус: "
                  f"<b style=\"color:{color}\">{title}</b> — "
                  f"{_e(str(live.get('status_text') or '').rstrip('.'))}. "
-                 f"Прогресс к горизонту: {_num(pct, 0)} % от {need} "
-                 f"{_plural(need, 'сделки', 'сделок', 'сделок')} (POOL-T-3). "
-                 f"<b>Правило POOL-T-3 (исправлено 22.10.2026):</b> горизонт фиксирован — 680 сделок; "
-                 f"просмотры на 200/340/520/680 требуют z ≥ 3,43 / 2,54 / 1,96 / 1,64 (границы "
-                 f"O'Brien–Fleming, ошибка первого рода 5 % на весь план); бесполезность — только на "
-                 f"340 при z &lt; 1,29. Прежнее правило «t ≥ 2,00 в любой момент» отозвано: собственная "
-                 f"симуляция дала 19,7 % ложных «доказано» при ρ = 0 и 40,1 % при ρ = 0,3.")
+                 f"Прогресс к горизонту: {_num(pct, 0)} % — {cl_n} из {need_cl} кластеров (POOL-T-4). "
+                 f"<b>Правило POOL-T-4:</b> горизонт — 210 кластеров; просмотры на 62/105/160/210 "
+                 f"кластерах требуют z ≥ 3,42 / 2,54 / 1,96 / 1,64 (границы O'Brien–Fleming, ошибка "
+                 f"первого рода 5 % на весь план); бесполезность — только на 105 при z &lt; 0,50. "
+                 f"Симуляция 20 000 путей после правки: <b>ложных «доказано» 5,8 %</b>, мощность 58,6 % "
+                 f"при эффекте +0,345 % и 24,1 % при половинном. Прежнее правило «t ≥ 2,00 в любой "
+                 f"момент» отозвано: оно давало 19,7 % ложных при ρ = 0 и 40,1 % при ρ = 0,3.")
     hcl = hist.get("clustered") or {}
     hist_note = (f"Среднее {_num(hp.get('mean'), 3, plus=True)} % · sd {_num(hp.get('sd'), 2)} · "
                  f"<b>t = {_num(hp.get('t'), 2)}</b> наивный · кластерный z = "
-                 f"{_num(hcl.get('t'), 2)} по {int(hcl.get('clusters') or 0)} эпизодам · статус: "
-                 f"{_e({'proven': 'доказано', 'refuted': 'опровергнуто'}.get(hist.get('status'), 'не решено'))}. "
+                 f"{_num(hcl.get('t'), 2)} по {int(hcl.get('clusters') or 0)} эпизодам · "
+                 f"<b>не доказательство</b>. "
                  f"<b>Доказательством не считается:</b> внутри символы разработки, а время в нём идёт "
                  f"назад. Нужен, чтобы видеть темп и разброс: {_num(hist.get('trades_per_year'), 0)} "
                  f"сделок в год на {len(syms)} символов.")
