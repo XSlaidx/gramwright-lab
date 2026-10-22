@@ -2253,6 +2253,25 @@ def render_body() -> str:
                  f"не то число, которое получает счёт."),
                 "#38bdf8"))
 
+        # Портфель: четыре рукава по 25 %. Отвечает на вопрос «что со счётом, когда символы работают
+        # вместе», а не «какой символ лучше».
+        try:
+            pf = json.load(open(os.path.join(DEMO, "regime-portfolio.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            pf = {}
+        if pf.get("equity_multiple"):
+            rows_.append(_row(
+                "режим", "портфель · 4 рукава по 25 %",
+                f"CAGR {_num(pf.get('cagr_pct'), 1, plus=True)} %",
+                f"{pf.get('months')} мес.",
+                (f"Итог ×{_num(pf.get('equity_multiple'), 2)} за {_num(pf.get('years'), 1)} года: "
+                 f"максимальная просадка {_num(pf.get('max_drawdown_pct'), 1)} % против "
+                 f"17–32 % у отдельных символов, Sharpe {_num(pf.get('sharpe_monthly'), 2)} против "
+                 f"0,15–0,79, худший месяц {_num(pf.get('worst_month_pct'), 1, plus=True)} %, "
+                 f"лучший {_num(pf.get('best_month_pct'), 1, plus=True)} %. Корзина сглаживает "
+                 f"эквити: SOL с нулевым итогом не топит счёт, потому что его доля ограничена 25 %."),
+                "#22c55e"))
+
         # Переносимость на TradFi (MT5): тот же фильтр на золоте и EURUSD с их реальными издержками.
         # Проверка опубликована потому, что она ОТРИЦАТЕЛЬНАЯ — иначе стенд перестал бы быть проверкой.
         try:
