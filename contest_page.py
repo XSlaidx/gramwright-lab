@@ -642,6 +642,15 @@ def _lock_cost_txt() -> str:
             else f"сэкономило {_num(abs(val), 2)} п.п.: пропущенные сделки в сумме дали минус")
 
 
+def _minutes_between(a, b) -> float:
+    """Сколько минут между двумя метками «%Y-%m-%d %H:%M:%S» (0, если не разобрать)."""
+    try:
+        fmt = "%Y-%m-%d %H:%M:%S"
+        return (dt.datetime.strptime(str(b)[:19], fmt) - dt.datetime.strptime(str(a)[:19], fmt)).total_seconds() / 60
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _a_choice_note() -> str:
     """Почему A выбран long-only — датой, хешем и цифрами, а не «так лучше».
 
@@ -657,9 +666,13 @@ def _a_choice_note() -> str:
             f"(t = {_num(lg.get('t'), 2)}, n = {lg.get('n')}) против шортов "
             f"{_num(sh.get('mean_pct'), 3, plus=True)} % (t = {_num(sh.get('t'), 2)}, "
             f"n = {sh.get('n')}), разница {_num(d.get('difference_pct_points'), 3, plus=True)} п.п. "
-            f"при t = {_num(d.get('t_difference'), 2)}. Записано {str(d.get('recorded_at'))[:16]} UTC, "
-            f"хеш конфига {str(decl.get('config_hash'))[:8]}, форвард начат "
-            f"{str(d.get('forward_started'))[:16]} — то есть после объявления. "
+            f"при t = {_num(d.get('t_difference'), 2)}. Объявление записано "
+            f"{str(decl.get('ts'))[:16]} UTC (хеш конфига {str(decl.get('config_hash'))[:8]}), форвард "
+            f"считается с {str(d.get('forward_started'))[:16]} UTC — через "
+            f"{_num(_minutes_between(decl.get('ts'), d.get('forward_started')), 0)} "
+            f"{_plural(int(_minutes_between(decl.get('ts'), d.get('forward_started'))), 'минута', 'минуты', 'минут')} после "
+            f"объявления. Сама запись в файл выборки сделана позже, {str(d.get('recorded_at'))[:16]} UTC: "
+            f"она документирует решение, принятое ДО начала форварда, а не после его результатов. "
             f"Ретроспектива — ориентир, а не подтверждение.")
 
 
@@ -683,34 +696,35 @@ def _model_window_note() -> str:
 
 
 def _portfolio_chart() -> str:
-    """Кривая портфеля из четырёх рукавов — по месяцам, из regime-sizing.json.
+    """Кривая портфеля из четырёх рукавов — по КАЖДОЙ сделке, из regime-sizing.json.
 
-    Зачем рисунок, а не только строка: сила портфеля видна в том, что четыре шумных рукава
-    складываются в ровную линию. Одним числом это не показать.
+    Почему не по месяцам (правка 22.10.2026 по замечанию владельца): просадка 14,2 % считается на
+    торговом шаге, а на месячных точках выходило ~8 % — это была ДРУГАЯ величина, выданная за ту же.
+      • первая точка — старт ×1,00 в момент первого входа, иначе ось начинается не с капитала;
+      • точка максимальной просадки считается по тем же точкам, что нарисованы, и подписана числом;
+      • месяцев со сделками меньше, чем месяцев в периоде — так и написано, а не «27 мес.».
     """
     try:
         d = json.load(open(os.path.join(DEMO, "regime-sizing.json"), encoding="utf-8"))
     except (OSError, ValueError):
         return ""
-    variants = d.get("variants") or {}
-    eq = (variants.get("equal") or {})
-    pts = eq.get("curve_monthly") or []
-    if len(pts) < 6:
+    eq = ((d.get("variants") or {}).get("equal") or {})
+    pts = [(int(t), float(v)) for t, v in (eq.get("curve") or []) if v]
+    if len(pts) < 10:
         return ""
+    pts = [(pts[0][0] - 1, 1.0)] + pts          # старт: капитал ×1,00
     vals = [v for _, v in pts]
     lo, hi = min(vals), max(vals)
     span = (hi - lo) or 1.0
-    w, h, pad_l, pad_b = 900, 210, 46, 26
-    inner_w, inner_h = w - pad_l - 12, h - pad_b - 14
+    w, h, pad_l, pad_b = 900, 220, 54, 26
+    inner_w, inner_h = w - pad_l - 14, h - pad_b - 16
 
     def xy(i: int, v: float) -> tuple[float, float]:
         x = pad_l + inner_w * i / max(len(pts) - 1, 1)
-        y = 14 + inner_h * (1 - (v - lo) / span)
+        y = 16 + inner_h * (1 - (v - lo) / span)
         return x, y
 
-    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in
-                    (xy(i, v) for i, (_, v) in enumerate(pts)))
-    # максимальная просадка на кривой
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in (xy(i, v) for i, (_, v) in enumerate(pts)))
     peak, dd, dd_i = vals[0], 0.0, 0
     for i, v in enumerate(vals):
         peak = max(peak, v)
@@ -718,30 +732,46 @@ def _portfolio_chart() -> str:
         if cur > dd:
             dd, dd_i = cur, i
     dd_x, dd_y = xy(dd_i, vals[dd_i])
-    labels = (f'<text x="{pad_l}" y="{h-8}" fill="var(--muted-foreground)" font-size="11">'
-              f'{pts[0][0]}</text>'
-              f'<text x="{w-12}" y="{h-8}" fill="var(--muted-foreground)" font-size="11" '
-              f'text-anchor="end">{pts[-1][0]}</text>'
-              f'<text x="{pad_l-8}" y="{14+6}" fill="var(--muted-foreground)" font-size="11" '
-              f'text-anchor="end">×{hi:.2f}</text>'
-              f'<text x="{pad_l-8}" y="{14+inner_h}" fill="var(--muted-foreground)" font-size="11" '
-              f'text-anchor="end">×{lo:.2f}</text>')
+
+    def label(ts_ms: int) -> str:
+        return time.strftime("%Y-%m", time.gmtime(ts_ms / 1000))
+
+    # Линия старта: нижняя граница оси — это МИНИМУМ кривой, а не капитал. Раньше внизу стояло
+    # «×1,00» при минимуме 0,96 — подпись врала о том, что нарисовано.
+    y_one = xy(0, 1.0)[1]
+    labels = (f'<line x1="{pad_l}" y1="{y_one:.1f}" x2="{w-14}" y2="{y_one:.1f}" '
+              f'stroke="var(--muted-foreground)" stroke-width="0.8" stroke-dasharray="4 4" '
+              f'opacity="0.55"/>'
+              f'<text x="{pad_l-8}" y="{y_one+4:.1f}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">×1,00</text>'
+              f'<text x="{pad_l}" y="{h-8}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="start">{label(pts[0][0])}</text>'
+              f'<text x="{w-14}" y="{h-8}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">{label(pts[-1][0])}</text>'
+              f'<text x="{pad_l-8}" y="{16+6}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">×{_num(hi, 2)}</text>'
+              f'<text x="{pad_l-8}" y="{16+inner_h}" fill="var(--muted-foreground)" font-size="11" '
+              f'text-anchor="end">×{_num(lo, 2)}</text>')
+    months_with = len(eq.get("curve_monthly") or [])
     return (f'<h2>Кривая портфеля: четыре рукава по 25 %</h2>'
             f'<p class="sub">Четыре символа торгуются независимо, у каждого своя четверть капитала '
-            f'и одна позиция за раз. Вход и выход — прежние (p ≥ 0,60 и режим, выход через 12 баров, '
+            f'и одна позиция за раз. Вход и выход прежние (p ≥ 0,60 и режим, выход через 12 баров, '
             f'тариф 0,11 %); изменился только учёт: размер берётся от текущего капитала. '
-            f'Итог ×{_num(eq.get("equity_multiple"), 2)} за {_num(eq.get("years"), 1)} года, '
-            f'максимальная просадка {_num(eq.get("max_drawdown_pct"), 1)} % '
-            f'(точка отмечена), Sharpe {_num(eq.get("sharpe_monthly"), 2)}. '
-            f'Средняя загрузка капитала {_num(eq.get("avg_exposure_pct"), 1)} %: деньги большую '
-            f'часть времени свободны — это запас на сглаживание, а не простой.</p>'
+            f'Итог ×{_num(eq.get("equity_multiple"), 2)} за {_num(eq.get("years"), 1)} года: '
+            f'{len(pts)-1} закрытых сделок, месяцы со сделками — {months_with}. '
+            f'Максимальная просадка {_num(dd * 100, 1)} %: посчитана по тем же точкам, что нарисованы, '
+            f'и отмечена на кривой. Sharpe {_num(eq.get("sharpe_monthly"), 2)}. '
+            f'Средняя загрузка капитала {_num(eq.get("avg_exposure_pct"), 1)} % — деньги большую часть '
+            f'времени свободны, и это запас, а не простой.</p>'
             f'<div class="chart-wrap" style="max-width:960px;margin:0 auto 14px">'
             f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" role="img" '
-            f'aria-label="Кривая капитала портфеля по месяцам">'
-            f'<line x1="{pad_l}" y1="{14+inner_h}" x2="{w-12}" y2="{14+inner_h}" '
+            f'aria-label="Кривая капитала портфеля по закрытым сделкам">'
+            f'<line x1="{pad_l}" y1="{16+inner_h}" x2="{w-14}" y2="{16+inner_h}" '
             f'stroke="var(--border)" stroke-width="1"/>'
-            f'<polyline points="{line}" fill="none" stroke="#22c55e" stroke-width="2"/>'
+            f'<polyline points="{line}" fill="none" stroke="#22c55e" stroke-width="1.6"/>'
             f'<circle cx="{dd_x:.1f}" cy="{dd_y:.1f}" r="4" fill="#f97316"/>'
+            f'<text x="{dd_x:.1f}" y="{dd_y-8:.1f}" fill="#f97316" font-size="11" '
+            f'text-anchor="middle">−{_num(dd * 100, 1)} %</text>'
             f'{labels}</svg></div>')
 
 
@@ -2180,6 +2210,21 @@ def render_body() -> str:
                 f'<code>{str(d.get("hypothesis_hash") or "")[:12]}</code>')
         if not merged:
             return ""
+        # Выродившиеся правила. Замер 22.10.2026: фильтр C («ход ≥ 3 × издержек») в этом прогоне не
+        # отсеял НИ ОДНОГО входа (порог 0,12 % при ожидаемых ходах порядка 0,5 %), поэтому факты C
+        # совпадали с A до знака. Показывать это двумя строками — значит выдавать одно правило за два.
+        degenerate = []
+        for sym_key in {k.split(" · ")[0] for k in merged}:
+            base = merged.get(f"{sym_key} · A · long-only") or []
+            base_actuals = {round(float(d.get("results", {}).get(f"{sym_key} · A · long-only", {})
+                                     .get("actual_pct") or 0), 2) for _, d, _ in base}
+            for k in list(merged):
+                if not k.startswith(f"{sym_key} · C"):
+                    continue
+                acts = {round(float(v.get("actual_pct") or 0), 2) for _, _, v in merged[k]}
+                if acts == base_actuals and base_actuals:
+                    merged.pop(k)
+                    degenerate.append(sym_key.replace("USDT", ""))
         rows_ = []
         for key, items in merged.items():
             parts, notes, any_above = [], [], False
@@ -2237,11 +2282,20 @@ def render_body() -> str:
                 '12 и 24 бара, блоки берутся в случайном порядке с возвращением, доходности '
                 'сохраняются, а тренд и порядок — нет; на каждой такой «альтернативной реальности» '
                 'прогоняется то же правило, тариф 0,11 % на круг. ' + " · ".join(heads) + '. '
-                'Обе гипотезы объявлены до чисел. <b>Оговорка:</b> короткое окно — медвежьи 1,4 '
+                + f'Все {len(heads)} гипотезы (B-1…B-{len(heads)}) объявлены до чисел, каждая со своим '
+                'хешем конфига. <b>Оговорка:</b> короткое окно — медвежьи 1,4 '
                 'года, а бутстрап стирает тренд, поэтому для long-only правила сравнение смещено '
                 'в минус; именно поэтому B-2 взяла окно 2,8 года, где есть и рост, и падение. '
                 '«Внутри полосы» здесь значит «преимущество не доказано», а не '
-                '«опровергнуто».</p>')
+                '«опровергнуто».'
+                + (f' <b>Про правило C:</b> в этом прогоне фильтр «ожидаемый ход ≥ 3 × издержек» '
+                   f'не отсеял ни одного входа (порог 0,12 % при ожидаемых ходах порядка 0,5 % '
+                   f'на 12 баров), поэтому его факты совпали с A до знака — и строка C здесь '
+                   f'не показана отдельно. Это не совпадение чисел, а выродившееся правило: '
+                   f'на крипте фильтр почти всегда пропускает, и третьей модели в этой проверке '
+                   f'фактически нет. Отдельно C работает в прогоне A/B/C, где у него две стороны.'
+                   if degenerate else '')
+                + '</p>')
         return head + "".join(rows_)
 
     bootstrap_rows = _bootstrap_block()
@@ -2830,8 +2884,10 @@ def render_body() -> str:
 {bootstrap_rows}
 
 <h2>Режимный фильтр</h2>
-<p class="sub">Единственная проверка, где время идёт только вперёд: решение по закрытому бару, исход через
-12 баров. Здесь же R-1, R-2, R-3 и живая бумажная книга на SOL и XRP.</p>
+<p class="sub">R-1, R-2 и R-3 — <b>исторические</b> прогоны: они считаны на прошлом, с бутстрапом и
+CPCV, и «вперёд» в них не идёт ничего. Время идёт только вперёд в живой книге ниже: решение принимается
+по закрытому бару, исход фиксируется через 12 баров позже — подкрутить его нельзя. Пока в ней закрытых
+сделок нет, поэтому доказанным считается только то, что пережило пересборку истории.</p>
 {regime_rows}
 
 {_portfolio_chart()}
