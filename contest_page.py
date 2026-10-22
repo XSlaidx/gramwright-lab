@@ -2278,19 +2278,32 @@ def render_body() -> str:
             tf = json.load(open(os.path.join(DEMO, "regime-tradfi.json"), encoding="utf-8"))
         except (OSError, ValueError):
             tf = {}
-        for sym in ("XAUUSD", "EURUSD"):
-            m = (tf.get("results") or {}).get(sym) or {}
-            if not m.get("trades"):
-                continue
+        # Одна строка вместо двух: у EURUSD 30 сделок — это не результат, а отсутствие статистики,
+        # и печатать «+0,002 %/сделку» отдельной строкой значит выдавать шум за измерение.
+        _tfr = tf.get("results") or {}
+        _gold, _euro = _tfr.get("XAUUSD") or {}, _tfr.get("EURUSD") or {}
+        if _gold.get("trades") or _euro.get("trades"):
+            _txt = []
+            if _gold.get("trades"):
+                _txt.append(f"Золото: {int(_gold['trades'])} сделок, "
+                            f"{_num(_gold.get('net_mean_pct'), 3, plus=True)} % на сделку, "
+                            f"CAGR {_num(_gold.get('cagr_pct'), 1, plus=True)} %, "
+                            f"Sharpe {_num(_gold.get('sharpe'), 2)} — эдж отрицательный")
+            if _euro.get("trades"):
+                _txt.append(f"EURUSD: {int(_euro['trades'])} сделок за "
+                            f"{_num(_euro.get('years') or _tfr.get('years'), 1)} года — статистики нет, "
+                            f"но и убытка нет (CAGR {_num(_euro.get('cagr_pct'), 1, plus=True)} %)")
             rows_.append(_row(
-                "режим", f"{sym} · тот же фильтр на MT5",
-                f"{_num(m.get('net_mean_pct'), 3, plus=True)} %/сделку",
-                f"{int(m.get('trades') or 0)} сдел.",
-                (f"Издержки инструмента, а не криптовый тариф: {_num(m.get('cost_round_trip_pct'), 3)} % "
-                 f"на круг (в 3–8 раз ниже). Итог: CAGR {_num(m.get('cagr_pct'), 1, plus=True)} %, "
-                 f"просадка {_num(m.get('max_drawdown_pct'), 1)} %, Sharpe {_num(m.get('sharpe'), 2)}. "
-                 f"Перенос не подтверждён: на золоте эдж отрицательный, на EURUSD ноль — дело не в "
-                 f"издержках, а в том, что признаки обучены на крипте."),
+                "режим", "перенос на MT5 (TradFi) · проверен",
+                "не подтверждён",
+                "TradFi",
+                ("Тот же фильтр на часовых барах брокера с издержками инструмента "
+                 f"({_num(_gold.get('cost_round_trip_pct'), 3)} % на круг по золоту против 0,11 % "
+                 f"на крипте). " + "; ".join(_txt) + ". Дело не в комиссиях — они в 3–8 раз ниже "
+                 "криптовых, а в том, что признаки обучены на крипте: на золоте модель ждёт "
+                 "продолжения там, где идёт возврат. Побочный вывод: MT5-контур стенда торгует "
+                 "другим правилом (EMA 9/21), и там результат положительный — метод и площадка "
+                 "не одно и то же."),
                 "#f97316"))
 
         # D-2: проверка того же фильтра на ДРУГИХ входах (перцентиль модели D). Отрицательный
