@@ -724,55 +724,74 @@ def _clustered_txt(symbol: str) -> str:
 
 
 def _pool_block() -> str:
-    """Доказательство по пулу (POOL-T-2): правило остановки объявлено до чисел.
+    """Доказательство по пулу (POOL-T-2): живая книга — доказательство, история — отправная точка.
 
-    22.10.2026 выяснилось, что по отдельности ни один символ не доказуем (BTC 6 лет, ETH 8 лет,
-    SOL 226 лет), а пул из четырёх даёт t = 1,71 на 378 сделках. Поэтому единица доказательства —
-    пул, и статус считается из объявленных границ, а не выбирается словами.
+    Правило остановки объявлено до чисел. Живая книга считается с нуля: история в доказательство
+    не идёт (в ней есть символы разработки). Второй строкой — история, чтобы видеть темп набора.
     """
-    try:
-        d = json.load(open(os.path.join(DEMO, "pool-t2.json"), encoding="utf-8"))
-        h = json.load(open(os.path.join(DEMO, "pool-t2-hypothesis.json"), encoding="utf-8"))
-    except (OSError, ValueError):
+    def _load(name: str) -> dict:
+        try:
+            return json.load(open(os.path.join(DEMO, name), encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    live, hist, decl = _load("pool-t2-live.json"), _load("pool-t2.json"), _load("pool-t2-hypothesis.json")
+    if not hist.get("pool", {}).get("n") and not live:
         return ""
-    pool = d.get("pool") or {}
-    if not pool.get("n"):
-        return ""
-    st = d.get("status") or "unresolved"
+    syms = decl.get("symbols") or []
+    hp = hist.get("pool") or {}
+    lp = live.get("pool") or {}
+    n_live, t_live = int(lp.get("n") or 0), float(lp.get("t") or 0.0)
+    st = live.get("status") or "collecting"
+    title = {"proven": "доказано", "refuted": "опровергнуто",
+             "refuted_early": "опровергнуто досрочно",
+             "collecting": "набирается"}.get(st, "не решено")
     color = {"proven": "#4ade80", "refuted": "#f87171",
              "refuted_early": "#f87171"}.get(st, "#f59e0b")
-    title = {"proven": "доказано", "refuted": "опровергнуто",
-             "refuted_early": "опровергнуто досрочно"}.get(st, "не решено")
-    syms = h.get("symbols") or []
-    n = int(pool["n"])
-    need_now = (2.0 * float(pool["sd"]) / abs(float(pool["mean"]))) ** 2 if pool["mean"] else 0
-    note = (f"Среднее {_num(pool['mean'], 3, plus=True)} % на сделку · sd {_num(pool['sd'], 2)} · "
-            f"<b>t = {_num(pool['t'], 2)}</b> · статус: <b style=\"color:{color}\">{title}</b>. "
-            f"{_e(str(d.get('status_text') or '').rstrip('.'))}. "
-            f"Правило остановки объявлено {_e(str(h.get('declared_at'))[:16])} "
-            f"(хеш {_e(str(h.get('config_hash'))[:8])}): доказано при t ≥ 2,00; опровергнуто, если "
-            f"на 520 сделках t &lt; 1,00; досрочно опровергнуто при t &lt; 0 после 200 сделок. "
-            f"Планка «≈520 сделок» объявлена заранее; при текущем среднем и разбросе до t = 2,00 "
-            f"нужно ≈{_num(need_now, 0)} — цифра уточняется по разбросу, порог 2,00 не меняется. "
-            f"Темп истории {_num(d.get('trades_per_year'), 0)} сделок в год. "
-            f"<b>Это история, а не доказательство:</b> доказательством станет пул живых сделок по "
-            f"тому же правилу — порог 0,60 и список символов заморожены.")
+    need = 701
+    pct = min(100.0, 100.0 * n_live / need)
+    live_note = (f"t = {_num(t_live, 2)} на {n_live} "
+                 f"{_plural(n_live, 'сделке', 'сделках', 'сделках')} · статус: "
+                 f"<b style=\"color:{color}\">{title}</b> — "
+                 f"{_e(str(live.get('status_text') or '').rstrip('.'))}. "
+                 f"Прогресс к порогу: {_num(pct, 0)} % от ≈{need} "
+                 f"{_plural(need, 'сделки', 'сделок', 'сделок')}. "
+                 f"Проверки по объявлению: на {_e(str(live.get('checkpoint') or 200))} сделках t &lt; 0 — "
+                 f"направление закрывается досрочно; на {_e(str(live.get('refute_at') or 520))} сделках "
+                 f"t &lt; 1,00 — тоже закрывается; t ≥ 2,00 — доказано.")
+    hist_note = (f"Среднее {_num(hp.get('mean'), 3, plus=True)} % · sd {_num(hp.get('sd'), 2)} · "
+                 f"<b>t = {_num(hp.get('t'), 2)}</b> · статус по объявлению: "
+                 f"{_e({'proven': 'доказано', 'refuted': 'опровергнуто'}.get(hist.get('status'), 'не решено'))}. "
+                 f"<b>Доказательством не считается:</b> внутри символы разработки, а время в нём идёт "
+                 f"назад. Нужен, чтобы видеть темп и разброс: {_num(hist.get('trades_per_year'), 0)} "
+                 f"сделок в год на {len(syms)} символов.")
     return ('<h2>Доказательство: пул, а не символ</h2>'
             '<p class="sub">Ни один символ по отдельности не доказуем: чтобы t дошло до 2, BTC нужно '
             '272 сделки (6,1 года), ETH 411 (8,3), XRP 319 (4,7), SOL 6 182 (226 лет). '
             'Пул складывает сделки всех символов в одно наблюдение — это и есть объявленная '
-            'единица доказательства.</p>'
-            '<p class="sub">Символы объявления: ' + ", ".join(x.replace("USDT", "") for x in syms)
+            'единица доказательства. Символы: '
+            + ", ".join(x.replace("USDT", "") for x in syms)
             + '. Список заморожен до конца испытания — добавлять символы после того, как увидели '
               'результат, запрещено.</p>'
             + (f'<div class="rrow" style="--c:{color}">'
                f'<div class="rname"><span class="rb" style="background:{_tint(color, 0.15)};'
-               f'border-color:{_tint(color, 0.45)}">доказательство</span>'
-               f'<b>пул · {len(syms)} символов</b></div>'
-               f'<div class="rval">t = {_num(pool["t"], 2)}'
-               f'<span class="rn"> · {n} {_plural(n, "сделка", "сделки", "сделок")}</span></div>'
-               f'<div class="rnote">{note}</div></div>')
-            + '<p class="sub">Правило целиком и перечень запретов — на странице '
+               f'border-color:{_tint(color, 0.45)}">живая книга</span>'
+               f'<b>доказательство</b></div>'
+               f'<div class="rval">t = {_num(t_live, 2)}'
+               f'<span class="rn"> · {n_live} {_plural(n_live, "сделка", "сделки", "сделок")}</span></div>'
+               f'<div class="rnote">{live_note}</div></div>' if live else "")
+            + (f'<div class="rrow" style="--c:#8a98a6">'
+               f'<div class="rname"><span class="rb" style="background:{_tint("#8a98a6", 0.15)};'
+               f'border-color:{_tint("#8a98a6", 0.45)}">история</span>'
+               f'<b>отправная точка</b></div>'
+               f'<div class="rval">t = {_num(hp.get("t"), 2)}'
+               f'<span class="rn"> · {int(hp.get("n") or 0)} '
+               f'{_plural(int(hp.get("n") or 0), "сделка", "сделки", "сделок")}</span></div>'
+               f'<div class="rnote">{hist_note}</div></div>' if hp.get("n") else "")
+            + '<p class="sub">Правило остановки объявлено '
+            + _e(str(decl.get("declared_at") or "")[:16])
+            + f' (хеш {_e(str(decl.get("config_hash"))[:8])}) до чисел. Порог 0,60 и список символов '
+              'заморожены — ослаблять под результат нельзя. Правило целиком — на странице '
               '<a href="/lab/research/">«Исследование (не результат)»</a>.</p>')
 
 
